@@ -18,6 +18,7 @@ import { z, ZodError } from "zod";
 import { Store } from "./db.ts";
 import { Service, now, today } from "./service.ts";
 import { Tracking } from "./tracking.ts";
+import { Insights } from "./insights.ts";
 import { csv, report, reportNames } from "./reports.ts";
 import {
   assert,
@@ -54,7 +55,8 @@ export async function buildApp(
       ".data/mr-connect.sqlite",
   );
   const service = new Service(store),
-    tracking = new Tracking(service);
+    tracking = new Tracking(service),
+    insights = new Insights(service, tracking);
   const uploadDir = resolve(
     options.uploads || process.env.UPLOAD_DIR || ".data/uploads",
   );
@@ -619,6 +621,49 @@ export async function buildApp(
         .send(csv(rows));
     return { items: rows };
   });
+  app.get("/api/exports", async (r) =>
+    insights.exportCatalog(r.user, r.query as any),
+  );
+  app.get("/api/exports/:key", async (r, reply) => {
+    const key = (r.params as any).key as string;
+    const rows = insights.exportRows(r.user, key, r.query as any);
+    insights.recordExport(r.user, key, r.query as any, rows.length);
+    return reply
+      .header(
+        "Content-Disposition",
+        `attachment; filename="mr-connect-${key.replace(":", "-")}.csv"`,
+      )
+      .type("text/csv; charset=utf-8")
+      .send(csv(rows));
+  });
+  app.get("/api/orders", async (r) => insights.orders(r.user, r.query as any));
+  app.get("/api/orders/:id", async (r) => ({
+    item: insights.order(r.user, id(r)),
+  }));
+  app.get("/api/exceptions", async (r) =>
+    insights.exceptions(r.user, r.query as any),
+  );
+  app.get("/api/visits/:id/evidence", async (r) =>
+    insights.evidence(r.user, id(r)),
+  );
+  app.post("/api/visits/:id/review", async (r) =>
+    mutate(r, () => {
+      const b = z
+        .object({
+          decision: z.enum(["accept", "flag"]),
+          note: z.string().max(1000),
+        })
+        .strict()
+        .parse(r.body);
+      return insights.reviewVisit(r.user, id(r), b);
+    }),
+  );
+  app.get("/api/analytics/:type", async (r) =>
+    insights.analytics(r.user, (r.params as any).type, r.query as any),
+  );
+  app.get("/api/users/:id/profile", async (r) =>
+    insights.profile(r.user, id(r), r.query as any),
+  );
   app.get("/api/policies", async (r) => ({
     policies: service.policies(r.user),
   }));

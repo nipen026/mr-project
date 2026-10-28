@@ -27,6 +27,14 @@ import {
   Reports,
   Team,
 } from "./pages";
+import {
+  EmployeeProfile,
+  Evidence,
+  Exceptions,
+  ExportCenter,
+  OrderDetail,
+  OrdersPage,
+} from "./insights";
 import { TrackingPage } from "./TrackingPage";
 import { Account, Settings } from "./Settings";
 import type { User } from "../../../packages/shared/src/index.ts";
@@ -197,7 +205,7 @@ const nav = [
   ["/module/tourplan", "calendar-days", "Tour plans"],
   ["/tracking", "map-pin", "Calls & tracking"],
   ["/approvals", "shield-check", "Approvals"],
-  ["/module/sale", "wallet", "POB & sales"],
+  ["/pob", "wallet", "POB & sales"],
   ["/inventory", "package", "Samples & inputs"],
   ["/module/campaign", "target", "Campaigns"],
   ["/reports", "chart-no-axes-combined", "Reports"],
@@ -335,6 +343,12 @@ function WorkspaceApp({ user, logout }: { user: User; logout: () => void }) {
             <Routes>
               <Route path="/" element={<Overview />} />
               <Route path="/team" element={<Team />} />
+              <Route path="/team/:id" element={<EmployeeProfile />} />
+              <Route path="/pob" element={<OrdersPage />} />
+              <Route path="/pob/:id" element={<OrderDetail />} />
+              <Route path="/exceptions" element={<Exceptions />} />
+              <Route path="/calls/:id" element={<Evidence />} />
+              <Route path="/exports" element={<ExportCenter />} />
               <Route
                 path="/customers"
                 element={<RecordsPage key="customer" kind="customer" />}

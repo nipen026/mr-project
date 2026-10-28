@@ -17,6 +17,7 @@ import {
   useResource,
 } from "./ui";
 import { RecordForm, RecordDetail } from "./forms";
+import { VisualReport, visualReports } from "./insights";
 import {
   moduleByKey,
   money,
@@ -434,6 +435,7 @@ export function Approvals() {
             {k ? moduleByKey[k]?.title || "Daily reports" : "All submissions"}
           </button>
         ))}
+        <Link to="/exceptions">Visit exceptions</Link>
       </div>
       {loading ? (
         <Spinner />
@@ -528,7 +530,15 @@ export function Team() {
           )}
           onRow={workspace.user.role === "admin" ? setEdit : undefined}
           columns={[
-            { key: "name", label: "Employee" },
+            {
+              key: "name",
+              label: "Employee",
+              render: (r) => (
+                <Link className="text-button" to={"/team/" + r.id}>
+                  <strong>{r.name}</strong>
+                </Link>
+              ),
+            },
             { key: "email", label: "User ID" },
             { key: "role", label: "Role" },
             {
@@ -767,7 +777,7 @@ export function Inventory() {
   );
 }
 export function Reports() {
-  const { workspace, version } = useWorkspace();
+  const { workspace } = useWorkspace();
   const [type, setType] = useState("productivity");
   const [from, setFrom] = useState(
     new Date()
@@ -778,10 +788,6 @@ export function Reports() {
     new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }),
   );
   const query = `?from=${from}&to=${to}`;
-  const { data, error, loading } = useResource(
-    () => api("/reports/" + type + query),
-    [type, from, to, version],
-  );
   const names = [
     "productivity",
     "deviations",
@@ -799,12 +805,17 @@ export function Reports() {
         title="Reporting center"
         description="Explore field productivity, coverage, sales and the operational audit trail."
         actions={
-          <a
-            className="button"
-            href={"/api/reports/" + type + query + "&format=csv"}
-          >
-            Download CSV
-          </a>
+          <>
+            <Link className="button secondary" to="/exports">
+              Export center
+            </Link>
+            <a
+              className="button"
+              href={"/api/reports/" + type + query + "&format=csv"}
+            >
+              Download CSV
+            </a>
+          </>
         }
       />
       <div className="filter-bar">
@@ -824,7 +835,7 @@ export function Reports() {
             type="date"
             value={from}
             max={to}
-            onChange={(e) => setFrom(e.target.value)}
+            onChange={(e) => e.target.value && setFrom(e.target.value)}
           />
         </label>
         <label>
@@ -833,26 +844,37 @@ export function Reports() {
             type="date"
             value={to}
             min={from}
-            onChange={(e) => setTo(e.target.value)}
+            onChange={(e) => e.target.value && setTo(e.target.value)}
           />
         </label>
       </div>
-      {loading ? (
-        <Spinner />
-      ) : error ? (
-        <Notice tone="error">{error}</Notice>
+      {visualReports.includes(type) ? (
+        <VisualReport type={type} from={from} to={to} />
       ) : (
-        <section className="card no-padding">
-          <Table
-            rows={data.items}
-            columns={Object.keys(data.items[0] || { result: "" }).map((k) => ({
-              key: k,
-              label: k.replace(/([A-Z])/g, " $1"),
-            }))}
-          />
-        </section>
+        <GenericReport type={type} query={query} />
       )}
     </>
+  );
+}
+function GenericReport({ type, query }: { type: string; query: string }) {
+  const { version } = useWorkspace();
+  const { data, error, loading } = useResource(
+    () => api("/reports/" + type + query),
+    [type, query, version],
+  );
+  if (loading) return <Spinner />;
+  if (error) return <Notice tone="error">{error}</Notice>;
+  return (
+    <section className="card no-padding">
+      <Table
+        stack
+        rows={data.items}
+        columns={Object.keys(data.items[0] || { result: "" }).map((k) => ({
+          key: k,
+          label: k.replace(/([A-Z])/g, " $1"),
+        }))}
+      />
+    </section>
   );
 }
 export function Activity() {
@@ -913,6 +935,15 @@ export function Activity() {
                       key: "orderTotal",
                       label: "POB",
                       render: (r: any) => money(r.orderTotal),
+                    },
+                    {
+                      key: "evidence",
+                      label: "Evidence",
+                      render: (r: any) => (
+                        <Link className="text-button" to={"/calls/" + r.id}>
+                          View evidence →
+                        </Link>
+                      ),
                     },
                   ]
                 : [

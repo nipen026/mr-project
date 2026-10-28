@@ -172,6 +172,46 @@ export function Metric({
     </div>
   );
 }
+export function BarChart({
+  title,
+  items,
+  format = (n) => String(n),
+  hint,
+}: {
+  title: string;
+  items: { label: string; value: number }[];
+  format?: (n: number) => string;
+  hint?: string;
+}) {
+  const max = Math.max(1, ...items.map((i) => i.value));
+  return (
+    <section className="card">
+      <div className="card-heading">
+        <h3>{title}</h3>
+        {hint && <small>{hint}</small>}
+      </div>
+      {items.length === 0 ? (
+        <p className="muted">No data for this range.</p>
+      ) : (
+        <ul className="hbars" aria-label={title}>
+          {items.map((i) => (
+            <li key={i.label}>
+              <span className="hbar-label" title={i.label}>
+                {i.label}
+              </span>
+              <span className="hbar-track">
+                <span
+                  style={{ width: Math.max(2, (i.value / max) * 100) + "%" }}
+                />
+              </span>
+              <strong>{format(i.value)}</strong>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
 export function PageTitle({
   eyebrow = "FIELD OPERATIONS",
   title,
@@ -202,18 +242,20 @@ export function Table({
   onRow,
   empty,
   caption,
+  stack = false,
 }: {
   columns: { key: string; label: string; render?: (row: any) => ReactNode }[];
   rows: any[];
   onRow?: (r: any) => void;
   empty?: ReactNode;
   caption?: string;
+  stack?: boolean;
 }) {
   const [page, setPage] = useState(0);
   useEffect(() => setPage(0), [rows]);
   const count = Math.max(1, Math.ceil(rows.length / 10));
   return (
-    <div className="table-wrap">
+    <div className={stack ? "table-wrap stack" : "table-wrap"}>
       <table>
         <caption className="sr-only">{caption || "Records"}</caption>
         <thead>
@@ -230,7 +272,7 @@ export function Table({
           {rows.slice(page * 10, page * 10 + 10).map((r, i) => (
             <tr key={r.id || i}>
               {columns.map((c, j) => (
-                <td key={c.key}>
+                <td key={c.key} data-label={c.label}>
                   {c.render ? (
                     c.render(r)
                   ) : j === 0 ? (
@@ -241,7 +283,7 @@ export function Table({
                 </td>
               ))}
               {onRow && (
-                <td>
+                <td data-label="Action">
                   <button
                     className="text-button"
                     onClick={() => onRow(r)}
