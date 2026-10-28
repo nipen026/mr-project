@@ -352,6 +352,8 @@ fun Detail(vm: FieldViewModel) {
         }
         Secondary("Set a call reminder") { vm.add("reminder") }
     }
+    if (kind == "customer") Secondary(vm.t("Addresses")) { vm.openAddresses(r) }
+    if (kind == "campaign") Secondary(vm.t("Campaign doctors")) { vm.openCampaignDoctors(r.text("id")) }
     if (kind == "product" && r.text("contentId").isNotEmpty())
         Primary("Open product presentation") { vm.viewAttachment(r.text("contentId")) }
     r.array("decisions").forEach { d ->
@@ -406,7 +408,7 @@ fun Detail(vm: FieldViewModel) {
 
 @Composable
 fun DailyReport(vm: FieldViewModel) {
-    var date by rememberSaveable { mutableStateOf(localDate()) }
+    var date by rememberSaveable(vm.reportDate) { mutableStateOf(vm.reportDate.ifEmpty { localDate() }) }
     var remarks by rememberSaveable { mutableStateOf("") }
     Entry("Reporting date", date, { date = it }, true)
     val calls = vm.records("visit").filter { it.text("date") == date }

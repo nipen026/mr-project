@@ -28,6 +28,11 @@ export class Store {
   CREATE TABLE IF NOT EXISTS operations(tenant_id TEXT NOT NULL,user_id TEXT NOT NULL,operation_id TEXT NOT NULL,request_hash TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(tenant_id,user_id,operation_id));
   CREATE TABLE IF NOT EXISTS attachments(id TEXT PRIMARY KEY,tenant_id TEXT NOT NULL,owner_id TEXT NOT NULL,name TEXT NOT NULL,mime TEXT NOT NULL,path TEXT NOT NULL,size INTEGER NOT NULL,created_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS audit(id TEXT PRIMARY KEY,tenant_id TEXT NOT NULL,actor_id TEXT,action TEXT NOT NULL,entity_id TEXT NOT NULL,details TEXT NOT NULL,created_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS support_requests(id TEXT PRIMARY KEY,tenant_id TEXT NOT NULL,user_id TEXT,kind TEXT NOT NULL,category TEXT NOT NULL,subject TEXT NOT NULL,message TEXT NOT NULL,reference TEXT NOT NULL DEFAULT '',contact TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'open',response TEXT NOT NULL DEFAULT '',resolved_by TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS support_scope ON support_requests(tenant_id,status,created_at);
+  CREATE TABLE IF NOT EXISTS preferences(user_id TEXT PRIMARY KEY REFERENCES users(id),language TEXT NOT NULL DEFAULT 'en',updated_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS customer_addresses(id TEXT PRIMARY KEY,tenant_id TEXT NOT NULL,customer_id TEXT NOT NULL REFERENCES records(id),label TEXT NOT NULL,line TEXT NOT NULL,city TEXT NOT NULL DEFAULT '',state TEXT NOT NULL DEFAULT '',pin_code TEXT NOT NULL DEFAULT '',version INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS address_customer ON customer_addresses(tenant_id,customer_id);
   INSERT OR IGNORE INTO schema_versions VALUES(1,datetime('now'));
   `);
   }

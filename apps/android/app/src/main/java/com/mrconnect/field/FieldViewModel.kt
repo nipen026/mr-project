@@ -33,6 +33,20 @@ class FieldViewModel(application: Application) : AndroidViewModel(application) {
     var formInitial by mutableStateOf<JSONObject?>(null)
     var locked by mutableStateOf(repo.vault.pinHash.isNotEmpty() && repo.vault.token.isNotEmpty())
     var localVersion by mutableIntStateOf(0)
+    var hindi by mutableStateOf(repo.vault.hindi)
+        private set
+
+    var support by mutableStateOf<JSONObject?>(null)
+    var access by mutableStateOf<JSONObject?>(null)
+    var pendingReports by mutableStateOf<JSONObject?>(null)
+    var campaignDoctors by mutableStateOf<JSONObject?>(null)
+    var campaignId by mutableStateOf("")
+    var addressCustomer by mutableStateOf<JSONObject?>(null)
+    var addresses by mutableStateOf<JSONObject?>(null)
+    var restrictedMessage by mutableStateOf("")
+    var restrictedFrom by mutableStateOf("")
+    var accessReference by mutableStateOf("")
+    var reportDate by mutableStateOf("")
     val user
         get() = boot?.optJSONObject("user") ?: JSONObject()
 
@@ -65,15 +79,212 @@ class FieldViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 block()
             } catch (e: Exception) {
-                error = e.message ?: "Something went wrong"
-                if (e is ApiException && e.status == 401) {
-                    message = "Your session expired. Sign in again; your saved work is retained."
-                    screen = "login"
-                }
+                handle(e)
             } finally {
                 busy = false
                 localVersion++
             }
+        }
+    }
+
+    private fun handle(e: Exception) {
+        error = e.message ?: "Something went wrong"
+        if (e is ApiException && e.status == 401) {
+            message = "Your session expired. Sign in again; your saved work is retained."
+            screen = "login"
+        } else if (
+            e is ApiException &&
+                e.status == 403 &&
+                e.code != "PASSWORD_CHANGE_REQUIRED" &&
+                screen !in listOf("welcome", "login", "access-help")
+        ) {
+            restrictedMessage = e.message ?: "You do not have access to this."
+            restrictedFrom = screen
+            error = ""
+            screen = "restricted"
+        }
+    }
+
+    /** Runs a read without blocking other work; failures use the same error handling. */
+    private fun fetch(block: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                block()
+            } catch (e: Exception) {
+                handle(e)
+            } finally {
+                localVersion++
+            }
+        }
+    }
+
+    private suspend fun online(
+        method: String,
+        path: String,
+        body: JSONObject = JSONObject(),
+    ): JSONObject =
+        try {
+            repo.request(method, path, body, java.util.UUID.randomUUID().toString())
+        } catch (e: java.io.IOException) {
+            throw IllegalStateException("Connect to the internet to do this.")
+        }
+
+    /** Hindi text for the main workflows; falls back to English. */
+    fun t(en: String): String = if (hindi) Hindi.words[en] ?: en else en
+
+    fun setLanguage(on: Boolean) {
+        hindi = on
+        repo.vault.hindi = on
+        localVersion++
+        viewModelScope.launch {
+            try {
+                repo.request(
+                    "PUT",
+                    "/preferences",
+                    JSONObject().put("language", if (on) "hi" else "en"),
+                )
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun requestAccess(company: String, email: String, reason: String) {
+        work {
+            val r =
+                online(
+                    "POST",
+                    "/auth/access-help",
+                    JSONObject()
+                        .put("companyCode", company.trim())
+                        .put("email", email.trim())
+                        .put("reason", reason.trim()),
+                )
+            accessReference = r.text("reference")
+            message = r.text("message")
+        }
+    }
+
+    fun loadSupport() = fetch { support = repo.get("/support", "support") }
+
+    fun createTicket(category: String, subject: String, body: String, reference: String) {
+        work {
+            online(
+                "POST",
+                "/support/tickets",
+                JSONObject()
+                    .put("category", category)
+                    .put("subject", subject)
+                    .put("message", body)
+                    .put("reference", reference),
+            )
+            support = repo.get("/support", "support")
+            message = "Request sent. Your administrator will reply here."
+        }
+    }
+
+    fun requestModuleAccess() {
+        val from = restrictedFrom.ifEmpty { "app" }
+        work {
+            online(
+                "POST",
+                "/support/tickets",
+                JSONObject()
+                    .put("category", "access")
+                    .put("subject", "Access request")
+                    .put("message", "I need access to $from. $restrictedMessage")
+                    .put("reference", from),
+            )
+            support = null
+            message = "Access request sent to your administrator."
+        }
+    }
+
+    fun openAccess() {
+        navigate("restricted")
+        restrictedMessage = ""
+    }
+
+    fun loadAccess() = fetch { access = repo.get("/access", "access") }
+
+    fun loadPending() = fetch { pendingReports = repo.get("/dcr/pending", "pending-reports") }
+
+    fun prepareReport(date: String) {
+        navigate("dcr")
+        reportDate = date
+    }
+
+    fun openCampaignDoctors(id: String) {
+        navigate("campaign-doctors")
+        campaignId = id
+        campaignDoctors = null
+    }
+
+    fun loadCampaignDoctors() {
+        val id = campaignId
+        if (id.isEmpty()) return
+        fetch { campaignDoctors = repo.get("/campaigns/$id/doctors", "campaign-doctors-$id") }
+    }
+
+    fun startCall(customerId: String) {
+        val customer = records("customer").find { it.text("id") == customerId }
+        val plan =
+            records("dayplan").find {
+                it.text("date") == localDate() && it.text("ownerId") == user.text("id")
+            }
+        if (customer == null) error = "Sync your customers before recording a call"
+        else if (plan == null) error = "Submit today’s day plan before recording a call"
+        else {
+            error = ""
+            selected = customer
+            screen = "visit"
+        }
+    }
+
+    fun openAddresses(customer: JSONObject) {
+        navigate("addresses")
+        addressCustomer = customer
+        addresses = null
+    }
+
+    fun loadAddresses() {
+        val id = addressCustomer?.text("id") ?: return
+        fetch { addresses = repo.get("/customers/$id/addresses", "addresses-$id") }
+    }
+
+    fun saveAddress(
+        customerId: String,
+        existing: JSONObject?,
+        label: String,
+        line: String,
+        city: String,
+        state: String,
+        pin: String,
+        onSaved: () -> Unit,
+    ) {
+        work {
+            val body =
+                JSONObject()
+                    .put("label", label)
+                    .put("line", line)
+                    .put("city", city)
+                    .put("state", state)
+                    .put("pinCode", pin)
+            addresses =
+                if (existing == null) online("POST", "/customers/$customerId/addresses", body)
+                else
+                    online(
+                        "PUT",
+                        "/customer-addresses/${existing.text("id")}",
+                        body.put("version", existing.optInt("version")),
+                    )
+            message = "Address saved"
+            onSaved()
+        }
+    }
+
+    fun removeAddress(id: String) {
+        work {
+            addresses = online("DELETE", "/customer-addresses/$id")
+            message = "Address removed"
         }
     }
 
@@ -203,6 +414,10 @@ class FieldViewModel(application: Application) : AndroidViewModel(application) {
                 screen = "account"
             } else {
                 refresh()
+                boot?.optJSONObject("preferences")?.let {
+                    hindi = it.text("language") == "hi"
+                    repo.vault.hindi = hindi
+                }
                 screen = "home"
             }
         }
@@ -217,6 +432,8 @@ class FieldViewModel(application: Application) : AndroidViewModel(application) {
         message = ""
         screen = to
         selected = null
+        if (to != "dcr") reportDate = ""
+        if (to != "restricted") restrictedMessage = ""
         localVersion++
     }
 
@@ -311,6 +528,7 @@ class FieldViewModel(application: Application) : AndroidViewModel(application) {
                     true,
                 )
             refresh()
+            reportDate = ""
             if (result.optBoolean("queued")) {
                 screen = "module/dcr"
                 message = "Draft saved offline. Sync before submitting."

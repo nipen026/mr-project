@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { api, json } from "./api";
 import { useWorkspace } from "./context";
 import { Button, Notice, PageTitle, Table, useResource } from "./ui";
+import { SupportRequests } from "./insights";
 const policyLabels: Record<string, string> = {
   gpsRadiusMeters: "Visit verification radius (m)",
   maxAccuracyMeters: "Maximum GPS uncertainty (m)",
@@ -44,7 +45,14 @@ export function Settings() {
         description="Reporting policies, access permissions and connected services."
       />
       <div className="tabs">
-        {["policies", "roles", "integrations", "audit", "account"].map((t) => (
+        {[
+          "policies",
+          "roles",
+          "integrations",
+          "audit",
+          ...(workspace.user.role === "admin" ? ["support"] : []),
+          "account",
+        ].map((t) => (
           <button
             key={t}
             className={tab === t ? "active" : ""}
@@ -179,6 +187,14 @@ export function Settings() {
           </section>
         ) : (
           <Notice>Administrator access is required for the audit log.</Notice>
+        ))}
+      {tab === "support" &&
+        (workspace.user.role === "admin" ? (
+          <SupportRequests />
+        ) : (
+          <Notice>
+            Administrator access is required for support requests.
+          </Notice>
         ))}
       {tab === "account" && <Account />}
     </>

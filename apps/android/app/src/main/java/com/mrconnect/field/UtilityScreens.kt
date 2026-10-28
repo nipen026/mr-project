@@ -112,22 +112,11 @@ fun AccountScreen(vm: FieldViewModel) {
         Text(vm.user.text("email"), color = Muted)
         Text(vm.user.text("role"), color = Brand)
     }
-    var hindi by remember { mutableStateOf(vm.repo.vault.hindi) }
-    Row {
-        Switch(
-            checked = hindi,
-            onCheckedChange = {
-                hindi = it
-                vm.repo.vault.hindi = it
-                vm.localVersion++
-            },
-        )
-        Text("Hindi home example / हिंदी होम", Modifier.padding(12.dp))
+    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Switch(checked = vm.hindi, onCheckedChange = { vm.setLanguage(it) })
+        Text(vm.t("Use the app in Hindi") + " / हिंदी", Modifier.padding(12.dp))
     }
-    Message(
-        "The Hindi home is a localization example. The remaining field workflows currently use English."
-    )
-    Text("Local app PIN", style = MaterialTheme.typography.titleMedium)
+    Text(vm.t("Local app PIN"), style = MaterialTheme.typography.titleMedium)
     Entry("New six-digit PIN", pin, { pin = it }, password = true, number = true)
     Secondary("Set app PIN") {
         if (!Regex("\\d{6}").matches(pin)) vm.error = "Use exactly six digits"
@@ -138,12 +127,14 @@ fun AccountScreen(vm: FieldViewModel) {
         }
     }
     if (vm.repo.vault.pinHash.isNotEmpty()) Secondary("Lock app now") { vm.locked = true }
-    Text("Change company password", style = MaterialTheme.typography.titleMedium)
+    Text(vm.t("Change company password"), style = MaterialTheme.typography.titleMedium)
     Entry("Current password", current, { current = it }, password = true)
     Entry("New password (12+ characters)", next, { next = it }, password = true)
     Primary("Change password & sign out", !vm.busy) { vm.password(current, next) }
     Secondary("Permissions & location status") { vm.navigate("permissions") }
-    Secondary("Sign out") { vm.logout() }
+    Secondary(vm.t("Help & support")) { vm.navigate("help") }
+    Secondary(vm.t("My access")) { vm.openAccess() }
+    Secondary(vm.t("Sign out")) { vm.logout() }
 }
 
 @Composable
@@ -201,6 +192,7 @@ fun ReportsScreen(vm: FieldViewModel) {
             "tourplan" to "Tour plan status",
         )
         .forEach { (key, title) -> Secondary(title) { vm.navigate("module/$key") } }
+    Secondary(vm.t("Pending reporting dates")) { vm.navigate("pending-reports") }
     Text(
         "These totals use the records currently synced to this phone.",
         style = MaterialTheme.typography.bodyMedium,

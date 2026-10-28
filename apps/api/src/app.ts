@@ -19,6 +19,13 @@ import { Store } from "./db.ts";
 import { Service, now, today } from "./service.ts";
 import { Tracking } from "./tracking.ts";
 import { Insights } from "./insights.ts";
+import {
+  Support,
+  preferencesBody,
+  ticketBody,
+  ticketUpdate,
+} from "./support.ts";
+import { FieldOps, addressBody } from "./fieldops.ts";
 import { csv, report, reportNames } from "./reports.ts";
 import {
   assert,
@@ -56,7 +63,9 @@ export async function buildApp(
   );
   const service = new Service(store),
     tracking = new Tracking(service),
-    insights = new Insights(service, tracking);
+    insights = new Insights(service, tracking),
+    support = new Support(service),
+    fieldops = new FieldOps(service);
   const uploadDir = resolve(
     options.uploads || process.env.UPLOAD_DIR || ".data/uploads",
   );
@@ -256,16 +265,16 @@ export async function buildApp(
   app.post(
     "/api/auth/access-help",
     { config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } },
-    async (r) => {
-      z.object({
-        companyCode: z.string().max(40),
-        email: z.string().max(254),
-      }).parse(r.body);
-      return {
-        message:
-          "Contact your company administrator to verify your identity and reset access. Automated email is not configured.",
-      };
-    },
+    async (r) =>
+      support.accessRequest(
+        z
+          .object({
+            companyCode: z.string().max(40),
+            email: z.string().max(254),
+            reason: z.string().max(1000).optional(),
+          })
+          .parse(r.body),
+      ),
   );
   app.get("/api/auth/me", async (r) => ({ user: r.user }));
   app.post("/api/auth/logout", async (r, reply) => {
@@ -313,6 +322,7 @@ export async function buildApp(
       r.user.tenantId,
     ),
     policies: service.policies(r.user),
+    preferences: support.preferences(r.user),
     modules: modules.filter((m) => !m.adminOnly || r.user.role === "admin"),
     users: service.users(r.user),
     records: Object.fromEntries(
@@ -664,6 +674,43 @@ export async function buildApp(
   app.get("/api/users/:id/profile", async (r) =>
     insights.profile(r.user, id(r), r.query as any),
   );
+  app.get("/api/support", async (r) => support.help(r.user));
+  app.get("/api/support/tickets", async (r) => ({
+    items: support.tickets(r.user, r.query as any),
+  }));
+  app.post("/api/support/tickets", async (r) =>
+    mutate(r, () => support.createTicket(r.user, ticketBody.parse(r.body))),
+  );
+  app.put("/api/support/tickets/:id", async (r) =>
+    mutate(r, () =>
+      support.updateTicket(r.user, id(r), ticketUpdate.parse(r.body)),
+    ),
+  );
+  app.get("/api/access", async (r) => support.access(r.user));
+  app.get("/api/preferences", async (r) => support.preferences(r.user));
+  app.put("/api/preferences", async (r) =>
+    support.setPreferences(r.user, preferencesBody.parse(r.body)),
+  );
+  app.get("/api/customers/:id/addresses", async (r) =>
+    fieldops.addresses(r.user, id(r)),
+  );
+  app.post("/api/customers/:id/addresses", async (r) =>
+    mutate(r, () =>
+      fieldops.addAddress(r.user, id(r), addressBody.parse(r.body)),
+    ),
+  );
+  app.put("/api/customer-addresses/:id", async (r) =>
+    mutate(r, () =>
+      fieldops.updateAddress(r.user, id(r), addressBody.parse(r.body)),
+    ),
+  );
+  app.delete("/api/customer-addresses/:id", async (r) =>
+    mutate(r, () => fieldops.removeAddress(r.user, id(r))),
+  );
+  app.get("/api/campaigns/:id/doctors", async (r) =>
+    fieldops.campaignDoctors(r.user, id(r)),
+  );
+  app.get("/api/dcr/pending", async (r) => fieldops.pendingReports(r.user));
   app.get("/api/policies", async (r) => ({
     policies: service.policies(r.user),
   }));

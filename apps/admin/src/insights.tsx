@@ -10,6 +10,7 @@ import {
   Button,
   Empty,
   Metric,
+  Modal,
   Notice,
   PageTitle,
   Spinner,
@@ -1143,5 +1144,185 @@ export function EmployeeProfile() {
         )}
       </Loaded>
     </>
+  );
+}
+/* ---------------- Support requests (mobile help, access and reset) ------------- */
+const ticketTabs: [string, string][] = [
+  ["open", "Open"],
+  ["in_progress", "In progress"],
+  ["resolved", "Resolved"],
+  ["", "All"],
+];
+const ticketBadge = (s: string) =>
+  s === "resolved" ? "approved" : s === "in_progress" ? "draft" : "pending";
+export function SupportRequests() {
+  const { notify, version } = useWorkspace();
+  const [status, setStatus] = useState("open");
+  const [reload, setReload] = useState(0);
+  const [detail, setDetail] = useState<any>();
+  const state = useResource(
+    () => api("/support/tickets?status=" + status),
+    [status, reload, version],
+  );
+  return (
+    <>
+      <div className="tabs">
+        {ticketTabs.map(([k, t]) => (
+          <button
+            key={k}
+            className={status === k ? "active" : ""}
+            onClick={() => setStatus(k)}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+      <Loaded state={state}>
+        {(d: any) => (
+          <section className="card no-padding">
+            <Table
+              stack
+              caption="Support requests"
+              rows={d.items}
+              onRow={setDetail}
+              empty={
+                <Empty
+                  title="No requests"
+                  body="Help, access and password-reset requests from the field app appear here."
+                />
+              }
+              columns={[
+                { key: "code", label: "Ref" },
+                {
+                  key: "kind",
+                  label: "Type",
+                  render: (r) =>
+                    r.kind === "access_reset" ? "Access reset" : r.category,
+                },
+                {
+                  key: "requesterName",
+                  label: "From",
+                  render: (r) => r.requesterName || r.contact,
+                },
+                { key: "subject", label: "Subject" },
+                {
+                  key: "status",
+                  label: "Status",
+                  render: (r) => <Badge status={ticketBadge(r.status)} />,
+                },
+                {
+                  key: "createdAt",
+                  label: "Raised",
+                  render: (r) => dateTime(r.createdAt),
+                },
+              ]}
+            />
+          </section>
+        )}
+      </Loaded>
+      {detail && (
+        <TicketDialog
+          ticket={detail}
+          onClose={() => setDetail(undefined)}
+          onSaved={() => {
+            setDetail(undefined);
+            setReload((n) => n + 1);
+            notify("Request updated");
+          }}
+        />
+      )}
+    </>
+  );
+}
+function TicketDialog({
+  ticket,
+  onClose,
+  onSaved,
+}: {
+  ticket: any;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [status, setStatus] = useState(ticket.status);
+  const [response, setResponse] = useState(ticket.response || "");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      await api(
+        "/support/tickets/" + ticket.id,
+        json("PUT", { status, response }, crypto.randomUUID()),
+      );
+      onSaved();
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal title={`${ticket.code} · ${ticket.subject}`} onClose={onClose} wide>
+      <dl className="details">
+        <div>
+          <dt>From</dt>
+          <dd>{ticket.requesterName || "Unknown user"}</dd>
+        </div>
+        <div>
+          <dt>Contact</dt>
+          <dd>{ticket.contact}</dd>
+        </div>
+        <div>
+          <dt>Raised</dt>
+          <dd>{dateTime(ticket.createdAt)}</dd>
+        </div>
+        <div>
+          <dt>Reference</dt>
+          <dd>{ticket.reference || "—"}</dd>
+        </div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <dt>Message</dt>
+          <dd>{ticket.message}</dd>
+        </div>
+      </dl>
+      {ticket.kind === "access_reset" && (
+        <Notice>
+          To reset this person's password, open Field team, choose the employee
+          and set a temporary password. They must change it at next sign-in.
+        </Notice>
+      )}
+      {error && <Notice tone="error">{error}</Notice>}
+      <div className="field">
+        <label htmlFor="ticket-status">Status</label>
+        <select
+          id="ticket-status"
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+        >
+          <option value="open">Open</option>
+          <option value="in_progress">In progress</option>
+          <option value="resolved">Resolved</option>
+        </select>
+      </div>
+      <div className="field">
+        <label htmlFor="ticket-response">
+          Response shown to the employee in the app
+        </label>
+        <textarea
+          id="ticket-response"
+          rows={3}
+          value={response}
+          onChange={(e) => setResponse(e.target.value)}
+        />
+      </div>
+      <div className="form-actions">
+        <Button secondary onClick={onClose}>
+          Cancel
+        </Button>
+        <Button disabled={busy} onClick={save}>
+          Save
+        </Button>
+      </div>
+    </Modal>
   );
 }

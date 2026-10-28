@@ -277,7 +277,7 @@ fun FieldApp(vm: FieldViewModel) {
                     )
             )
     }
-    val auth = vm.screen in listOf("welcome", "login")
+    val auth = vm.screen in listOf("welcome", "login", "access-help")
     BackHandler(enabled = !auth && vm.screen != "home") { vm.navigate("home") }
     LaunchedEffect(vm.screen) {
         if (
@@ -322,20 +322,30 @@ fun FieldApp(vm: FieldViewModel) {
                             Text(
                                 when {
                                     vm.screen == "home" ->
-                                        if (vm.repo.vault.hindi)
+                                        if (vm.hindi)
                                             "नमस्ते, " + vm.user.text("name").substringBefore(' ')
                                         else
                                             "Good day, " + vm.user.text("name").substringBefore(' ')
-                                    vm.screen == "calls" -> "Today’s visits"
-                                    vm.screen == "plan" -> "Plan your day"
-                                    vm.screen == "visit" -> "Record customer call"
-                                    vm.screen == "more" -> "Your workspace"
-                                    vm.screen == "reports" -> "My performance"
-                                    vm.screen == "sync" -> "Sync center"
-                                    vm.screen == "form" -> "Add / edit record"
-                                    vm.screen == "detail" -> "Record detail"
-                                    vm.screen == "dcr" -> "Daily call report"
-                                    vm.screen == "account" -> "Account & settings"
+                                    vm.screen == "calls" -> vm.t("Today’s visits")
+                                    vm.screen == "plan" -> vm.t("Plan your day")
+                                    vm.screen == "visit" -> vm.t("Record customer call")
+                                    vm.screen == "more" -> vm.t("Your workspace")
+                                    vm.screen == "reports" -> vm.t("My performance")
+                                    vm.screen == "sync" -> vm.t("Sync center")
+                                    vm.screen == "form" -> vm.t("Add / edit record")
+                                    vm.screen == "detail" -> vm.t("Record detail")
+                                    vm.screen == "dcr" -> vm.t("Daily call report")
+                                    vm.screen == "account" -> vm.t("Account & settings")
+                                    vm.screen == "help" -> vm.t("Help & support")
+                                    vm.screen == "restricted" ->
+                                        vm.t(
+                                            if (vm.restrictedMessage.isEmpty()) "Your access"
+                                            else "Access restricted"
+                                        )
+                                    vm.screen == "pending-reports" -> vm.t("Pending reporting dates")
+                                    vm.screen == "campaign-doctors" -> vm.t("Campaign doctors")
+                                    vm.screen == "addresses" -> vm.t("Customer addresses")
+                                    vm.screen == "access-help" -> vm.t("Reset access")
                                     else ->
                                         vm.modules
                                             .find { vm.screen == "module/" + it.text("key") }
@@ -345,7 +355,8 @@ fun FieldApp(vm: FieldViewModel) {
                             )
                             Text(
                                 localDate() +
-                                    if (vm.offline) " · Offline" else " · Company workspace",
+                                    " · " +
+                                    vm.t(if (vm.offline) "Offline" else "Company workspace"),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = Muted,
                             )
@@ -388,7 +399,7 @@ fun FieldApp(vm: FieldViewModel) {
                                     ) {
                                         FieldIcon(icon, 24)
                                         Text(
-                                            title,
+                                            vm.t(title),
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = if (vm.screen == route) Brand else Muted,
                                         )
@@ -422,6 +433,7 @@ fun FieldApp(vm: FieldViewModel) {
                 when {
                     vm.screen == "welcome" -> Welcome { vm.navigate("login") }
                     vm.screen == "login" -> LoginScreen(vm)
+                    vm.screen == "access-help" -> AccessHelp(vm)
                     vm.boot == null -> Message("Sign in to load your company workspace.")
                     vm.screen == "home" -> Home(vm, shiftAction)
                     vm.screen == "calls" -> Calls(vm)
@@ -435,6 +447,11 @@ fun FieldApp(vm: FieldViewModel) {
                     vm.screen == "account" -> AccountScreen(vm)
                     vm.screen == "reports" -> ReportsScreen(vm)
                     vm.screen == "permissions" -> PermissionsScreen(vm, locationAction)
+                    vm.screen == "help" -> HelpScreen(vm)
+                    vm.screen == "restricted" -> Restricted(vm)
+                    vm.screen == "pending-reports" -> PendingReports(vm)
+                    vm.screen == "campaign-doctors" -> CampaignDoctors(vm)
+                    vm.screen == "addresses" -> CustomerAddresses(vm)
                     vm.screen.startsWith("module/") -> ModuleList(vm, vm.screen.substringAfter('/'))
                 }
                 Spacer(Modifier.height(12.dp))
@@ -494,9 +511,7 @@ fun LoginScreen(vm: FieldViewModel) {
     ) {
         vm.login(company, email, password, base)
     }
-    Secondary("Forgot password?") {
-        vm.message = "Contact your company administrator to verify your identity and reset access."
-    }
+    Secondary(vm.t("Forgot password?")) { vm.navigate("access-help") }
 }
 
 @Composable
@@ -509,22 +524,25 @@ fun Home(vm: FieldViewModel, shiftAction: () -> Unit) {
     val visits = vm.records("visit").filter { it.text("date") == date }
     val customers = vm.records("customer").filter { it.text("assignedTo") == vm.user.text("id") }
     val next = customers.firstOrNull { c -> visits.none { it.text("customerId") == c.text("id") } }
+    LaunchedEffect(Unit) { vm.loadPending() }
+    val reportsDue = vm.pendingReports?.optJSONObject("summary")
+    Text(vm.t("Your workday"), style = MaterialTheme.typography.headlineMedium)
     if (plan == null) {
         FieldCard(color = Navy) {
             Text(
-                "Ready for the field?",
+                vm.t("Ready for the field?"),
                 color = Color.White,
                 style = MaterialTheme.typography.titleLarge,
             )
-            Text("Start with a clear plan for your day.", color = Color.White)
-            Primary("Plan your day") { vm.navigate("plan") }
+            Text(vm.t("Start with a clear plan for your day."), color = Color.White)
+            Primary(vm.t("Plan your day")) { vm.navigate("plan") }
         }
     } else {
         FieldCard(color = Soft) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 FieldIcon("calendar-days")
                 Column {
-                    Text("Your day, on track", fontWeight = FontWeight.Bold)
+                    Text(vm.t("Your day, on track"), fontWeight = FontWeight.Bold)
                     Text(
                         vm.names(plan.text("routeId")),
                         color = Muted,
@@ -537,7 +555,7 @@ fun Home(vm: FieldViewModel, shiftAction: () -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Box(Modifier.weight(1f)) {
             FieldCard {
-                Text("Visits", color = Muted)
+                Text(vm.t("Visits"), color = Muted)
                 Text(
                     "${visits.size} / ${customers.size}",
                     style = MaterialTheme.typography.headlineMedium,
@@ -551,7 +569,7 @@ fun Home(vm: FieldViewModel, shiftAction: () -> Unit) {
         }
         Box(Modifier.weight(1f)) {
             FieldCard {
-                Text("POB value", color = Muted)
+                Text(vm.t("POB value"), color = Muted)
                 Text(
                     rupees(visits.sumOf { it.optDouble("orderTotal", 0.0) }),
                     style = MaterialTheme.typography.titleLarge,
@@ -566,7 +584,7 @@ fun Home(vm: FieldViewModel, shiftAction: () -> Unit) {
     }
     if (next != null)
         FieldCard(color = Navy) {
-            Text("UP NEXT", color = Color(0xFFD9FF59), style = MaterialTheme.typography.bodyMedium)
+            Text(vm.t("UP NEXT"), color = Color(0xFFD9FF59), style = MaterialTheme.typography.bodyMedium)
             Text(
                 next.text("name"),
                 color = Color.White,
@@ -574,16 +592,16 @@ fun Home(vm: FieldViewModel, shiftAction: () -> Unit) {
                 fontWeight = FontWeight.Bold,
             )
             Text(next.text("specialty") + " · " + next.text("area"), color = Color.White)
-            Primary("View visit") {
+            Primary(vm.t("View visit")) {
                 vm.selected = next
                 vm.screen = "detail"
             }
         }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(
-                Triple("calls", "stethoscope", "Log a call"),
-                Triple("module/expense", "wallet", "Expenses"),
-                Triple("dcr", "calendar-days", "Daily report"),
+                Triple("calls", "stethoscope", vm.t("Log a call")),
+                Triple("module/expense", "wallet", vm.t("Expenses")),
+                Triple("dcr", "calendar-days", vm.t("Daily report")),
             )
             .forEach { (route, icon, title) ->
                 Box(Modifier.weight(1f)) {
@@ -606,8 +624,8 @@ fun Home(vm: FieldViewModel, shiftAction: () -> Unit) {
     }
     FieldCard {
         Text(
-            if (vm.repo.vault.shift.isEmpty()) "Shift tracking is off"
-            else "Your work shift is active",
+            if (vm.repo.vault.shift.isEmpty()) vm.t("Shift tracking is off")
+            else vm.t("Your work shift is active"),
             fontWeight = FontWeight.Bold,
         )
         Text(
@@ -618,13 +636,20 @@ fun Home(vm: FieldViewModel, shiftAction: () -> Unit) {
             style = MaterialTheme.typography.bodyMedium,
         )
         Primary(
-            if (vm.repo.vault.shift.isEmpty()) "Start work shift" else "End work shift",
+            if (vm.repo.vault.shift.isEmpty()) vm.t("Start work shift") else vm.t("End work shift"),
             plan != null && !vm.busy,
             onClick = shiftAction,
         )
-        Secondary("Location permissions & status") { vm.navigate("permissions") }
+        Secondary(vm.t("Location permissions & status")) { vm.navigate("permissions") }
     }
-    Secondary("Sync saved work (${vm.repo.db.pending(vm.repo.owner).size})") { vm.navigate("sync") }
+    if ((reportsDue?.optInt("total") ?: 0) > 0) {
+        if ((reportsDue?.optInt("overdue") ?: 0) > 0)
+            Message("${reportsDue?.optInt("overdue")} daily report(s) are past the reporting window.", true)
+        Secondary(vm.t("Pending reports") + " (${reportsDue?.optInt("total")})") {
+            vm.navigate("pending-reports")
+        }
+    }
+    Secondary(vm.t("Sync saved work") + " (${vm.repo.db.pending(vm.repo.owner).size})") { vm.navigate("sync") }
 }
 
 @Composable
@@ -632,12 +657,12 @@ fun Calls(vm: FieldViewModel) {
     var query by remember { mutableStateOf("") }
     var type by remember { mutableStateOf("Doctor") }
     Choice(
-        "Customer type",
+        vm.t("Customer type"),
         type,
         listOf("Doctor", "Chemist", "Hospital", "Stockist").map { it to it },
         { type = it },
     )
-    Entry("Search customers", query, { query = it })
+    Entry(vm.t("Search customers"), query, { query = it })
     val visits = vm.records("visit").filter { it.text("date") == localDate() }
     val customers =
         vm.records("customer").filter {
@@ -657,12 +682,12 @@ fun Calls(vm: FieldViewModel) {
                 color = Muted,
             )
             Text(
-                if (visits.any { it.text("customerId") == c.text("id") }) "Visited today"
-                else "Planned customer",
+                if (visits.any { it.text("customerId") == c.text("id") }) vm.t("Visited today")
+                else vm.t("Planned customer"),
                 color = Brand,
                 style = MaterialTheme.typography.bodyMedium,
             )
-            Secondary("View customer") {
+            Secondary(vm.t("View customer")) {
                 vm.selected = c
                 vm.screen = "detail"
             }
@@ -678,16 +703,16 @@ fun Plan(vm: FieldViewModel) {
         }
     if (existing != null) {
         FieldCard {
-            Text("Day plan submitted", style = MaterialTheme.typography.titleLarge)
+            Text(vm.t("Day plan submitted"), style = MaterialTheme.typography.titleLarge)
             Text(vm.names(existing.text("routeId")))
             Text(existing.text("workType"))
             Text(existing.text("notes"))
         }
-        Secondary("Edit today’s plan") { vm.edit(existing) }
-        Primary("Today’s visits") { vm.navigate("calls") }
+        Secondary(vm.t("Edit today’s plan")) { vm.edit(existing) }
+        Primary(vm.t("Today’s visits")) { vm.navigate("calls") }
     } else {
         Message("Choose your route and working type for ${localDate()}.")
-        Primary("Create day plan") { vm.add("dayplan") }
+        Primary(vm.t("Create day plan")) { vm.add("dayplan") }
         Text("Joint working and route selection are included in your plan.", color = Muted)
     }
 }
@@ -697,7 +722,7 @@ fun More(vm: FieldViewModel) {
     FieldCard(color = Navy) {
         Text(vm.user.text("name"), color = Color.White, style = MaterialTheme.typography.titleLarge)
         Text(vm.user.text("email"), color = Color(0xFFBED1D7))
-        Text("YOUR COMPANY WORKSPACE", color = Color(0xFFD9FF59), fontSize = 11.sp)
+        Text(vm.t("YOUR COMPANY WORKSPACE"), color = Color(0xFFD9FF59), fontSize = 11.sp)
     }
     vm.modules
         .groupBy { it.text("group") }
@@ -722,15 +747,14 @@ fun More(vm: FieldViewModel) {
                 }
             }
         }
-    Secondary("Daily call reports") { vm.navigate("module/dcr") }
-    Secondary("Stock & sales") {
+    Secondary(vm.t("Daily call reports")) { vm.navigate("module/dcr") }
+    Secondary(vm.t("Pending reporting dates")) { vm.navigate("pending-reports") }
+    Secondary(vm.t("Stock & sales")) {
         vm.navigate("stock")
         vm.screen = "module/inventory"
     }
-    Secondary("Sync center") { vm.navigate("sync") }
-    Secondary("Account & settings") { vm.navigate("account") }
-    Secondary("Help & support") {
-        vm.message =
-            "Contact your company administrator with the record ID, date and the message shown. Your offline operations are available in Sync center."
-    }
+    Secondary(vm.t("Sync center")) { vm.navigate("sync") }
+    Secondary(vm.t("Account & settings")) { vm.navigate("account") }
+    Secondary(vm.t("My access")) { vm.openAccess() }
+    Secondary(vm.t("Help & support")) { vm.navigate("help") }
 }
