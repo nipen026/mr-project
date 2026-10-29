@@ -172,17 +172,42 @@ fun Unlock(vm: FieldViewModel) {
 
 @Composable
 fun ReportsScreen(vm: FieldViewModel) {
-    val visits = vm.records("visit").filter { it.text("ownerId") == vm.user.text("id") }
-    val customers = vm.records("customer").filter { it.text("assignedTo") == vm.user.text("id") }
-    FieldCard {
-        Text("My performance", style = MaterialTheme.typography.titleLarge)
-        Text("Recorded calls: ${visits.size}")
-        Text(
-            "Unique customers: ${visits.map{it.text("customerId")}.toSet().size} / ${customers.size}"
-        )
-        Text("POB: " + rupees(visits.sumOf { it.optDouble("orderTotal", 0.0) }))
-        Text("GPS verified: ${visits.count{it.optBoolean("verified")}}", color = Brand)
-    }
+    LaunchedEffect(Unit) { vm.loadPerformance() }
+    val server = vm.performance
+    if (server != null) {
+        val k = server.optJSONObject("kpis") ?: JSONObject()
+        val c = server.optJSONObject("customers") ?: JSONObject()
+        FieldCard {
+            Text(vm.t("My performance"), style = MaterialTheme.typography.titleLarge)
+            Text(
+                server.text("from") + " → " + server.text("to"),
+                color = Muted,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text("Recorded calls: ${k.optInt("calls")} (${k.optInt("doctorCalls")} doctor calls)")
+            Text("GPS verified: ${k.optInt("verifiedRate")}%", color = Brand)
+            Text("POB: " + rupees(k.optDouble("pob", 0.0)))
+            Text("Worked days: ${k.optInt("workedDays")}")
+            Text("Expenses claimed: " + rupees(k.optDouble("expenses", 0.0)))
+            Text(
+                "Assigned customers: ${c.optInt("total")} (${c.optInt("doctors")} doctors, ${c.optInt("chemists")} chemists)"
+            )
+            Text("Awaiting approval: ${k.optInt("pendingApprovals")}")
+        }
+    } else if (vm.performanceOffline) {
+        val visits = vm.records("visit").filter { it.text("ownerId") == vm.user.text("id") }
+        val customers = vm.records("customer").filter { it.text("assignedTo") == vm.user.text("id") }
+        FieldCard {
+            Text(vm.t("My performance"), style = MaterialTheme.typography.titleLarge)
+            Text("Recorded calls: ${visits.size}")
+            Text(
+                "Unique customers: ${visits.map{it.text("customerId")}.toSet().size} / ${customers.size}"
+            )
+            Text("POB: " + rupees(visits.sumOf { it.optDouble("orderTotal", 0.0) }))
+            Text("GPS verified: ${visits.count{it.optBoolean("verified")}}", color = Brand)
+        }
+        Message("Offline: these totals use the records already synced to this phone.")
+    } else SkeletonCards(2)
     listOf(
             "dcr" to "Daily reports",
             "expense" to "Expense statement",
@@ -193,11 +218,6 @@ fun ReportsScreen(vm: FieldViewModel) {
         )
         .forEach { (key, title) -> Secondary(title) { vm.navigate("module/$key") } }
     Secondary(vm.t("Pending reporting dates")) { vm.navigate("pending-reports") }
-    Text(
-        "These totals use the records currently synced to this phone.",
-        style = MaterialTheme.typography.bodyMedium,
-        color = Muted,
-    )
 }
 
 @Composable

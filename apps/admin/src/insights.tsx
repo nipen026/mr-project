@@ -13,7 +13,7 @@ import {
   Modal,
   Notice,
   PageTitle,
-  Spinner,
+  ContentSkeleton,
   Table,
   useResource,
 } from "./ui";
@@ -66,7 +66,7 @@ function Loaded<T>({
   state: { data?: T; error: string; loading: boolean };
   children: (data: T) => ReactNode;
 }) {
-  if (state.loading && !state.data) return <Spinner />;
+  if (state.loading && !state.data) return <ContentSkeleton />;
   if (state.error) return <Notice tone="error">{state.error}</Notice>;
   return <>{state.data && children(state.data)}</>;
 }

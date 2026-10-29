@@ -47,6 +47,8 @@ class FieldViewModel(application: Application) : AndroidViewModel(application) {
     var restrictedFrom by mutableStateOf("")
     var accessReference by mutableStateOf("")
     var reportDate by mutableStateOf("")
+    var performance by mutableStateOf<JSONObject?>(null)
+    var performanceOffline by mutableStateOf(false)
     val user
         get() = boot?.optJSONObject("user") ?: JSONObject()
 
@@ -204,6 +206,20 @@ class FieldViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadAccess() = fetch { access = repo.get("/access", "access") }
+
+    fun loadPerformance() {
+        viewModelScope.launch {
+            try {
+                performance = repo.get("/performance", "performance")
+                performanceOffline = false
+            } catch (e: Exception) {
+                performanceOffline = true
+                if (e is ApiException) handle(e)
+            } finally {
+                localVersion++
+            }
+        }
+    }
 
     fun loadPending() = fetch { pendingReports = repo.get("/dcr/pending", "pending-reports") }
 

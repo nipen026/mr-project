@@ -38,6 +38,8 @@ Error envelope: `{ "error": { "code": "VERSION_CONFLICT", "message": "..." } }`.
 | POST `/import/customers`                                                  | Atomic `{rows:[...]}` CSV-derived import with row validation                                                          |
 | GET `/support`                                                            | Help topics, administrator contact and the caller's own requests                                                      |
 | GET/POST `/support/tickets`; PUT `/support/tickets/:id`                   | Raise a request (category sync/location/access/report/other); admins list all, set status and reply                   |
+| GET `/roles`                                                              | Roles matrix (people, data scope, readable/editable module counts) derived from the enforced rules                    |
+| GET `/performance`                                                        | Signed-in user's KPIs, customers and request statuses for the period (Android My performance)                         |
 | GET `/access`                                                             | Per-module read/write capability for the signed-in role, with the reason when restricted                              |
 | GET/PUT `/preferences`                                                    | Language preference (`en` or `hi`); also returned by `/bootstrap`                                                     |
 | GET/POST `/customers/:id/addresses`; PUT/DELETE `/customer-addresses/:id` | Extra customer addresses (max 10) beside the clinic and residence address; versioned                                  |

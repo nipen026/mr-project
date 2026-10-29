@@ -1,6 +1,10 @@
 import { DatabaseSync, backup } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
+if (process.env.DATABASE_URL)
+  throw new Error(
+    "DATABASE_URL is set, so the data lives in PostgreSQL. Use pg_dump or your provider's backups/branches instead; this script only snapshots the local SQLite file.",
+  );
 const dest = process.argv[2];
 if (!dest)
   throw new Error(

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -43,8 +44,13 @@ const visit = (extra: any = {}) => ({
 });
 let orderVisit: any, exceptionVisit: any;
 before(async () => {
+  // Set TEST_DATABASE_URL (a direct PostgreSQL URL) to run against PostgreSQL
+  // in a throwaway schema instead of a temporary SQLite file.
+  if (process.env.TEST_DATABASE_URL)
+    process.env.DATABASE_SCHEMA =
+      "mrtest_" + randomUUID().replaceAll("-", "").slice(0, 12);
   ctx = await buildApp({
-    databasePath: join(temp, "db.sqlite"),
+    databasePath: process.env.TEST_DATABASE_URL || join(temp, "db.sqlite"),
     uploads: join(temp, "uploads"),
     serveWeb: false,
   });
@@ -91,6 +97,7 @@ before(async () => {
   );
 });
 after(async () => {
+  await ctx.store.destroy();
   await ctx.app.close();
   rmSync(temp, { recursive: true, force: true });
 });

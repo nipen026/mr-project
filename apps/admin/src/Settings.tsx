@@ -2,7 +2,14 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, json } from "./api";
 import { useWorkspace } from "./context";
-import { Button, Notice, PageTitle, Table, useResource } from "./ui";
+import {
+  Button,
+  ContentSkeleton,
+  Notice,
+  PageTitle,
+  Table,
+  useResource,
+} from "./ui";
 import { SupportRequests } from "./insights";
 const policyLabels: Record<string, string> = {
   gpsRadiusMeters: "Visit verification radius (m)",
@@ -24,20 +31,25 @@ export function Settings() {
   const [values, setValues] = useState(workspace.policies);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const { data: integrations } = useResource(
+  const { data: integrations, loading: integrationsLoading } = useResource(
     () =>
       workspace.user.role === "admin"
         ? api("/integrations")
         : Promise.resolve({ items: [] }),
     [version],
   );
-  const { data: audit } = useResource(
+  const { data: audit, loading: auditLoading } = useResource(
     () =>
       workspace.user.role === "admin"
         ? api("/reports/audit")
         : Promise.resolve({ items: [] }),
     [version],
   );
+  const {
+    data: roles,
+    loading: rolesLoading,
+    error: rolesError,
+  } = useResource(() => api("/roles"), [version]);
   return (
     <>
       <PageTitle
@@ -121,46 +133,44 @@ export function Settings() {
           </form>
         </section>
       )}
-      {tab === "roles" && (
-        <section className="card no-padding">
-          <div className="card-heading">
-            <h3>Roles & permissions</h3>
-          </div>
-          <Table
-            rows={[
-              {
-                role: "Administrator",
-                scope: "Entire company",
-                masters: "Manage all",
-                approvals: "Team submissions except own",
-                settings: "Manage",
-              },
-              {
-                role: "Manager",
-                scope: "Own reporting hierarchy",
-                masters: "Manage assigned customers and routes",
-                approvals: "Team submissions except own",
-                settings: "Read policies",
-              },
-              {
-                role: "Representative",
-                scope: "Own data and assigned customers",
-                masters: "Own customers and routes",
-                approvals: "Submit, correct and resubmit own",
-                settings: "Own account",
-              },
-            ]}
-            columns={["role", "scope", "masters", "approvals", "settings"].map(
-              (k) => ({ key: k, label: k }),
-            )}
-          />
-          <p className="card-note">
-            Assign roles from Field team → Employee setup. Permissions are
-            enforced by the API.
-          </p>
-        </section>
+      {tab === "roles" &&
+        (rolesLoading ? (
+          <ContentSkeleton metrics={0} rows={3} />
+        ) : rolesError ? (
+          <Notice tone="error">{rolesError}</Notice>
+        ) : (
+          <section className="card no-padding">
+            <div className="card-heading">
+              <h3>Roles & permissions</h3>
+            </div>
+            <Table
+              stack
+              caption="Roles and permissions"
+              rows={roles?.items || []}
+              columns={[
+                { key: "label", label: "Role" },
+                { key: "people", label: "Active people" },
+                { key: "scope", label: "Data scope" },
+                {
+                  key: "modulesRead",
+                  label: "Modules",
+                  render: (r) =>
+                    `View ${r.modulesRead} · Edit ${r.modulesWrite}`,
+                },
+                { key: "approvals", label: "Approvals" },
+                { key: "settings", label: "Settings" },
+              ]}
+            />
+            <p className="card-note">
+              Assign roles from Field team → Employee setup. These rows are read
+              from the API rules that enforce access.
+            </p>
+          </section>
+        ))}
+      {tab === "integrations" && integrationsLoading && (
+        <ContentSkeleton metrics={0} rows={4} />
       )}
-      {tab === "integrations" && (
+      {tab === "integrations" && !integrationsLoading && (
         <section className="card no-padding">
           <Table
             rows={integrations?.items || []}
@@ -172,7 +182,11 @@ export function Settings() {
           />
         </section>
       )}
+      {tab === "audit" && auditLoading && (
+        <ContentSkeleton metrics={0} rows={6} />
+      )}
       {tab === "audit" &&
+        !auditLoading &&
         (workspace.user.role === "admin" ? (
           <section className="card no-padding">
             <Table

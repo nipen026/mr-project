@@ -17,19 +17,23 @@ if (
   );
 if (!/^[A-Z0-9_-]{2,40}$/.test(COMPANY_CODE) || !ADMIN_EMAIL.includes("@"))
   throw new Error("Invalid company code or email.");
-const s = new Store(process.env.DATABASE_PATH || ".data/mr-connect.sqlite");
+const s = await Store.open(
+  process.env.DATABASE_URL ||
+    process.env.DATABASE_PATH ||
+    ".data/mr-connect.sqlite",
+);
 const hash = await hashPassword(ADMIN_PASSWORD);
-s.transaction(() => {
+await s.transaction(async () => {
   const tenant = randomUUID(),
     user = randomUUID();
-  s.run(
+  await s.run(
     "INSERT INTO tenants VALUES(?,?,?,?)",
     tenant,
     COMPANY_CODE,
     COMPANY_NAME,
     JSON.stringify(defaultPolicies),
   );
-  s.run(
+  await s.run(
     "INSERT INTO users(id,tenant_id,email,name,role,password_hash) VALUES(?,?,?,?,?,?)",
     user,
     tenant,
@@ -39,7 +43,7 @@ s.transaction(() => {
     hash,
   );
 });
-s.close();
+await s.close();
 console.log(
   "Company and administrator created. No demonstration records were added.",
 );

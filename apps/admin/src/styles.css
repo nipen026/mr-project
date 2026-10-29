@@ -20,6 +20,13 @@
 }
 body {
   margin: 0;
+  text-transform: capitalize;
+}
+input,
+textarea,
+code,
+pre {
+  text-transform: none;
 }
 button,
 input,
@@ -1343,5 +1350,115 @@ tbody tr:hover {
   }
   .export-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+.skeleton {
+  display: block;
+  background: linear-gradient(90deg, #e6eff0 25%, #f4f8f8 37%, #e6eff0 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.4s ease infinite;
+}
+@keyframes shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+.skeleton-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.skeleton-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.skeleton-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+.skeleton-card {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.skeleton-filter {
+  flex-direction: row;
+  margin: 8px 0 10px;
+}
+.skeleton-filter .skeleton {
+  flex: 1;
+}
+.skeleton-table {
+  gap: 18px;
+}
+.skeleton-row {
+  display: flex;
+  gap: 4%;
+  align-items: center;
+}
+.skeleton-app {
+  display: flex;
+  min-height: 100vh;
+  background: var(--canvas);
+}
+.skeleton-side {
+  width: 248px;
+  flex: none;
+  background: white;
+  border-right: 1px solid var(--line);
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.skeleton-main {
+  flex: 1;
+  min-width: 0;
+  padding: 0 32px 32px;
+}
+.skeleton-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 76px;
+  margin-bottom: 24px;
+}
+@media (max-width: 1250px) {
+  .skeleton-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 800px) {
+  .skeleton-side {
+    display: none;
+  }
+  .skeleton-main {
+    padding: 0 16px 20px;
+  }
+  .skeleton-metrics {
+    gap: 12px;
+  }
+  .skeleton-filter {
+    flex-direction: column;
+  }
+  .skeleton-row .skeleton:nth-child(n + 3) {
+    display: none;
   }
 }

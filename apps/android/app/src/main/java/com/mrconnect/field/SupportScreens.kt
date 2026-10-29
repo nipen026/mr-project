@@ -66,7 +66,7 @@ fun HelpScreen(vm: FieldViewModel) {
         subject = ""
         body = ""
     }
-    if (data == null) Message(vm.t("Loading…"))
+    if (data == null) SkeletonCards(2)
     data?.optJSONObject("contact")?.let { c ->
         FieldCard(color = Navy) {
             Text(
@@ -140,6 +140,7 @@ fun Restricted(vm: FieldViewModel) {
         )
     }
     if (denied) Primary(vm.t("Request access"), !vm.busy) { vm.requestModuleAccess() }
+    if (vm.access == null) SkeletonCards(3)
     vm.access?.array("modules")?.forEach { m ->
         FieldCard {
             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -166,7 +167,7 @@ fun PendingReports(vm: FieldViewModel) {
     LaunchedEffect(Unit) { vm.loadPending() }
     val data = vm.pendingReports
     if (data == null) {
-        Message(vm.t("Loading…"))
+        SkeletonCards(3)
         return
     }
     val s = data.optJSONObject("summary") ?: JSONObject()
@@ -227,7 +228,7 @@ fun CampaignDoctors(vm: FieldViewModel) {
     LaunchedEffect(vm.campaignId) { vm.loadCampaignDoctors() }
     val data = vm.campaignDoctors
     if (data == null) {
-        Message(vm.t("Loading…"))
+        SkeletonCards(3)
         return
     }
     val c = data.optJSONObject("campaign") ?: JSONObject()
@@ -282,7 +283,7 @@ fun CustomerAddresses(vm: FieldViewModel) {
     var removing by remember { mutableStateOf<JSONObject?>(null) }
     Text(customer.text("name"), style = MaterialTheme.typography.titleLarge)
     if (data == null) {
-        Message(vm.t("Loading…"))
+        SkeletonCards(3)
         return
     }
     Text(vm.t("Saved on the customer record"), style = MaterialTheme.typography.titleMedium)

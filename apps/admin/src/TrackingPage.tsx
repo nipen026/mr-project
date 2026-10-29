@@ -10,7 +10,7 @@ import {
   Metric,
   Notice,
   PageTitle,
-  Spinner,
+  ContentSkeleton,
   Table,
   useResource,
 } from "./ui";
@@ -97,7 +97,7 @@ export function TrackingPage() {
       {error ? (
         <Notice tone="error">{error}</Notice>
       ) : loading && !data ? (
-        <Spinner />
+        <ContentSkeleton metrics={0} rows={4} />
       ) : (
         data && (
           <>

@@ -13,13 +13,14 @@
   ],
   "scripts": {
     "dev": "concurrently -k -n api,admin 'npm run dev -w @mr/api' 'npm run dev -w @mr/admin'",
-    "seed:demo": "tsx apps/api/src/seed.ts --demo",
+    "seed:demo": "tsx --env-file-if-exists=.env apps/api/src/seed.ts --demo",
     "build": "npm run build -w @mr/admin && tsc -p apps/api/tsconfig.json",
     "typecheck": "tsc --noEmit -p apps/admin/tsconfig.json && tsc --noEmit -p apps/api/tsconfig.json",
     "test": "tsx --test apps/api/test/*.test.ts",
     "test:e2e": "playwright test",
-    "start": "tsx apps/api/src/server.ts",
-    "check": "npm run typecheck && npm test && npm run build"
+    "start": "tsx --env-file-if-exists=.env apps/api/src/server.ts",
+    "check": "npm run typecheck && npm test && npm run build",
+    "seed:realistic": "tsx --env-file-if-exists=.env scripts/seed-realistic.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.1",

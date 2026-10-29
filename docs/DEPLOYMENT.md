@@ -2,7 +2,9 @@
 
 ## Supported installation
 
-Single Node 24 server, persistent local SQL volume, private uploads directory, HTTPS reverse proxy. SQLite WAL permits concurrent reads and serializes writes. Do not run multiple API replicas or store the DB on an unreliable network filesystem. Size the fleet through load testing; no production scale claim has been made.
+Single Node 24 server, a database, a private uploads directory and an HTTPS reverse proxy. The database is either a local SQLite file (WAL, serializes writes; keep it off unreliable network filesystems) or PostgreSQL via `DATABASE_URL`. Do not run multiple API replicas: reads are cached per process for `DATABASE_CACHE_SECONDS` (default 15) and a write only clears its own process. Size the fleet through load testing; no production scale claim has been made.
+
+**PostgreSQL.** Set `DATABASE_URL`. Tables are created automatically on first start. Use a pooled URL for the public schema, or a direct URL plus `DATABASE_SCHEMA=name` to keep the tables in a private schema (the schema is selected per connection, which a transaction-mode pooler cannot guarantee). Latency matters: every query is a network round trip, so keep the API in the same region as the database. `npm run seed:realistic` fills an empty database with a large fictional company for testing; never run it against a live company database.
 
 1. `npm ci && npm run build`.
 2. Copy `.env.example` into your deployment configuration. The process inherits environment variables; use `node --env-file=.env --import tsx apps/api/src/server.ts` when loading a local file. `NODE_ENV=production` enables secure cookies. Set `APP_ORIGINS` to the exact HTTPS origin and `HOST=127.0.0.1` behind the proxy. Set `TRUST_PROXY=1` only when a trusted local reverse proxy overwrites forwarded headers.

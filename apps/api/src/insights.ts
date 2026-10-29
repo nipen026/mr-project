@@ -38,17 +38,18 @@ export class Insights {
     assert(!from || from <= to, 400, "From date must not be after To date");
     return { from, to };
   }
-  private names(u: User) {
+  private async names(u: User) {
     const out = new Map<string, string>();
-    for (const row of this.s.store.all(
-      "SELECT id,data FROM records WHERE tenant_id=? AND deleted=0",
+    // Only kinds that carry a display name; activity records are not needed.
+    for (const row of await this.s.store.all(
+      "SELECT id,data FROM records WHERE tenant_id=? AND deleted=0 AND kind IN ('customer','product','input','route','territory','campaign','announcement')",
       u.tenantId,
     )) {
       const d = JSON.parse(row.data);
       const name = d.name || d.title;
       if (name) out.set(row.id, name);
     }
-    for (const row of this.s.store.all(
+    for (const row of await this.s.store.all(
       "SELECT id,name FROM users WHERE tenant_id=?",
       u.tenantId,
     ))
@@ -56,7 +57,7 @@ export class Insights {
     return out;
   }
   // ---- A43 Export center -------------------------------------------------
-  private datasets(u: User) {
+  private async datasets(u: User) {
     const reports = reportNames
       .filter((n) => n !== "audit" || u.role === "admin")
       .map((key) => ({
@@ -90,7 +91,7 @@ export class Insights {
       ...records,
     ];
   }
-  exportRows(u: User, key: string, q: Record<string, any>) {
+  async exportRows(u: User, key: string, q: Record<string, any>) {
     const [group, name] = key.split(":");
     const { from, to } = this.range(q, false);
     const query = { ...q, from, to };
@@ -103,10 +104,10 @@ export class Insights {
         403,
         "Administrator access required",
       );
-      return report(this.s, u, name, query)!;
+      return await report(this.s, u, name, query)!;
     }
     assert(group === "records", 404, "Export not found");
-    const names = this.names(u);
+    const names = await this.names(u);
     const resolve = (v: any): any =>
       typeof v === "string" && names.has(v)
         ? names.get(v)
@@ -114,7 +115,7 @@ export class Insights {
           ? v.map(resolve).join("; ")
           : v;
     if (name === "visit")
-      return this.s.list(u, "visit", query).map((v) => ({
+      return (await this.s.list(u, "visit", query)).map((v) => ({
         date: v.date,
         representative: v.ownerName,
         customer: v.customerName,
@@ -126,7 +127,7 @@ export class Insights {
         pob: v.orderTotal,
       }));
     if (name === "dcr")
-      return this.s.list(u, "dcr", query).map((r) => ({
+      return (await this.s.list(u, "dcr", query)).map((r) => ({
         date: r.date,
         representative: r.ownerName,
         status: r.status,
@@ -141,55 +142,67 @@ export class Insights {
       403,
       "Administrator access required",
     );
-    return this.s.list(u, name, query).map((r) => ({
+    return (await this.s.list(u, name, query)).map((r) => ({
       ...Object.fromEntries(mod.columns.map((k) => [k, resolve(r[k])])),
       status: r.status,
       owner: r.ownerName,
     }));
   }
-  exportCatalog(u: User, q: Record<string, any>) {
+  async exportCatalog(u: User, q: Record<string, any>) {
     const { from, to } = this.range(q);
-    const items = this.datasets(u).map((d) => ({
-      ...d,
-      rows: this.exportRows(u, d.key, { from, to }).length,
-    }));
-    const history = this.s.store
-      .all(
-        "SELECT a.entity_id AS dataset,a.details,a.created_at AS at,x.name AS actor FROM audit a JOIN users x ON x.id=a.actor_id WHERE a.tenant_id=? AND a.action='export.downloaded' ORDER BY a.created_at DESC LIMIT 100",
+    const [items, log] = await Promise.all([
+      Promise.all(
+        (await this.datasets(u)).map(async (d) => ({
+          ...d,
+          rows: (await this.exportRows(u, d.key, { from, to })).length,
+        })),
+      ),
+      this.s.store.all(
+        "SELECT a.entity_id AS dataset,a.details,a.created_at AS \"at\",x.name AS actor FROM audit a JOIN users x ON x.id=a.actor_id WHERE a.tenant_id=? AND a.action='export.downloaded' ORDER BY a.created_at DESC LIMIT 100",
         u.tenantId,
-      )
+      ),
+    ]);
+    const history = log
       .filter((h) => u.role === "admin" || h.actor === u.name)
       .slice(0, 15)
       .map((h) => ({ ...h, details: JSON.parse(h.details) }));
     return { from, to, items, history };
   }
-  recordExport(u: User, key: string, q: Record<string, any>, rows: number) {
-    this.s.audit(u, "export.downloaded", key, {
+  async recordExport(
+    u: User,
+    key: string,
+    q: Record<string, any>,
+    rows: number,
+  ) {
+    await this.s.audit(u, "export.downloaded", key, {
       from: q.from || null,
       to: q.to || null,
       rows,
     });
   }
   // ---- A30 / A31 POB orders ---------------------------------------------
-  private orderNumbers(u: User) {
+  private async orderNumbers(u: User) {
     const numbers = new Map<string, string>();
     let n = 0;
-    for (const row of this.s.store.all(
-      "SELECT id,data FROM records WHERE tenant_id=? AND kind='visit' AND deleted=0 ORDER BY created_at,id",
+    for (const row of await this.s.store.all(
+      `SELECT id FROM records WHERE tenant_id=? AND kind='visit' AND deleted=0 AND ${this.s.store.jsonArrayLength("data", "orderLines")}>0 ORDER BY created_at,id`,
       u.tenantId,
     ))
-      if (JSON.parse(row.data).orderLines?.length)
-        numbers.set(row.id, "POB-" + String(++n).padStart(4, "0"));
+      numbers.set(row.id, "POB-" + String(++n).padStart(4, "0"));
     return numbers;
   }
-  orders(u: User, q: Record<string, any>) {
+  async orders(u: User, q: Record<string, any>) {
     const { from, to } = this.range(q);
-    const numbers = this.orderNumbers(u);
+    const numbers = await this.orderNumbers(u);
     const needle = String(q.q || "")
       .trim()
       .toLowerCase();
-    const items = this.s
-      .list(u, "visit", { from, to, ownerId: q.ownerId })
+    const visits = await this.s.list(u, "visit", {
+      from,
+      to,
+      ownerId: q.ownerId,
+    });
+    const items = visits
       .filter((v) => numbers.has(v.id))
       .map((v) => ({
         id: v.id,
@@ -231,11 +244,11 @@ export class Insights {
       items,
     };
   }
-  order(u: User, id: string) {
-    const numbers = this.orderNumbers(u);
-    const v = this.s.record(u, id);
+  async order(u: User, id: string) {
+    const numbers = await this.orderNumbers(u);
+    const v = await this.s.record(u, id);
     assert(v.kind === "visit" && numbers.has(v.id), 404, "Order not found");
-    const names = this.names(u);
+    const names = await this.names(u);
     const name = (x: string) => names.get(x) || "Removed item";
     return {
       id: v.id,
@@ -270,11 +283,15 @@ export class Insights {
     };
   }
   // ---- A28 / A47 Verification exceptions and evidence --------------------
-  exceptions(u: User, q: Record<string, any>) {
+  async exceptions(u: User, q: Record<string, any>) {
     assert(u.role !== "rep", 403, "Manager access required");
     const { from, to } = this.range(q);
-    const all = this.s
-      .list(u, "visit", { from, to, ownerId: q.ownerId })
+    const visits = await this.s.list(u, "visit", {
+      from,
+      to,
+      ownerId: q.ownerId,
+    });
+    const all = visits
       .filter((v) => !v.verified)
       .map((v) => ({
         id: v.id,
@@ -308,9 +325,13 @@ export class Insights {
       items,
     };
   }
-  reviewVisit(u: User, id: string, input: { decision: string; note: string }) {
+  async reviewVisit(
+    u: User,
+    id: string,
+    input: { decision: string; note: string },
+  ) {
     assert(u.role !== "rep", 403, "Manager access required");
-    const v = this.s.record(u, id);
+    const v = await this.s.record(u, id);
     assert(v.kind === "visit", 404, "Call not found");
     assert(v.ownerId !== u.id, 403, "You cannot review your own call");
     assert(!v.verified, 409, "Only location exceptions need review");
@@ -322,7 +343,7 @@ export class Insights {
     const note = (input.note || "").trim();
     assert(note.length >= 5, 400, "Provide a note of at least five characters");
     assert(note.length <= 1000, 400, "Note is too long");
-    const row = this.s.raw(u, id);
+    const row = await this.s.raw(u, id);
     const review = {
       status: input.decision === "accept" ? "accepted" : "flagged",
       note,
@@ -331,20 +352,20 @@ export class Insights {
       at: now(),
     };
     // Runs inside the route's idempotent transaction.
-    this.s.store.run(
+    await this.s.store.run(
       "UPDATE records SET data=?,version=version+1,updated_at=? WHERE id=?",
       JSON.stringify({ ...JSON.parse(row.data), review }),
       now(),
       id,
     );
-    this.s.audit(u, "visit.exception_" + review.status, id, { note });
-    return this.s.record(u, id);
+    await this.s.audit(u, "visit.exception_" + review.status, id, { note });
+    return await this.s.record(u, id);
   }
-  evidence(u: User, id: string) {
-    const v = this.s.record(u, id);
+  async evidence(u: User, id: string) {
+    const v = await this.s.record(u, id);
     assert(v.kind === "visit", 404, "Call not found");
-    const policy = this.s.policies(u);
-    const customer = this.s.record(u, v.customerId);
+    const policy = await this.s.policies(u);
+    const customer = await this.s.record(u, v.customerId);
     const loc = v.location || null;
     const skew = loc
       ? Math.abs(Date.parse(loc.observedAt) - Date.parse(v.visitedAt))
@@ -395,15 +416,15 @@ export class Insights {
       },
     ];
     const at = Date.parse(v.visitedAt);
-    const trail = this.s.store
-      .all(
-        "SELECT observed_at AS observedAt,latitude,longitude,accuracy,mocked FROM points WHERE tenant_id=? AND user_id=? AND observed_at>=? AND observed_at<=? ORDER BY observed_at",
+    const trail = (
+      await this.s.store.all(
+        'SELECT observed_at AS "observedAt",latitude,longitude,accuracy,mocked FROM points WHERE tenant_id=? AND user_id=? AND observed_at>=? AND observed_at<=? ORDER BY observed_at',
         u.tenantId,
         v.ownerId,
         new Date(at - 30 * 60000).toISOString(),
         new Date(at + 30 * 60000).toISOString(),
       )
-      .map((p) => ({ ...p, mocked: !!p.mocked }));
+    ).map((p) => ({ ...p, mocked: !!p.mocked }));
     return {
       id: v.id,
       date: v.date,
@@ -435,14 +456,14 @@ export class Insights {
     };
   }
   // ---- A33 to A36 visual reports -----------------------------------------
-  analytics(u: User, type: string, q: Record<string, any>) {
+  async analytics(u: User, type: string, q: Record<string, any>) {
     assert(
       (analyticsTypes as readonly string[]).includes(type),
       404,
       "Report not found",
     );
     const { from, to } = this.range(q);
-    const rows = report(this.s, u, type, { ...q, from, to })!;
+    const rows = await report(this.s, u, type, { ...q, from, to })!;
     const stat = (label: string, value: string | number, hint: string) => ({
       label,
       value,
@@ -501,7 +522,7 @@ export class Insights {
       const byRep = new Map<string, number>();
       for (const r of rows)
         byRep.set(r.representative, (byRep.get(r.representative) || 0) + 1);
-      const planned = this.s.list(u, "dayplan", { from, to }).length;
+      const planned = (await this.s.list(u, "dayplan", { from, to })).length;
       summary = [
         stat("Deviations", rows.length, "Days not on the approved tour route"),
         stat("Representatives", byRep.size, "With at least one deviation"),
@@ -520,10 +541,11 @@ export class Insights {
         ),
       ];
     } else if (type === "missed-coverage") {
-      const doctors = this.s
-        .list(u, "customer")
-        .filter((c) => c.type === "Doctor");
-      const visits = this.s.list(u, "visit", { from, to });
+      const [customers, visits] = await Promise.all([
+        this.s.list(u, "customer"),
+        this.s.list(u, "visit", { from, to }),
+      ]);
+      const doctors = customers.filter((c) => c.type === "Doctor");
       const required = sum(doctors, (c) => c.frequency || 1);
       const covered = sum(doctors, (c) =>
         Math.min(
@@ -601,31 +623,65 @@ export class Insights {
     }
     return { type, from, to, summary, charts, rows };
   }
+  // Android "My performance": the same numbers the web profile shows.
+  async performance(u: User, q: Record<string, any>) {
+    const p = await this.profile(u, u.id, q);
+    return {
+      from: p.from,
+      to: p.to,
+      kpis: p.kpis,
+      customers: p.customers,
+      statuses: p.statuses,
+    };
+  }
   // ---- A04 Employee profile ----------------------------------------------
-  profile(u: User, id: string, q: Record<string, any>) {
+  async profile(u: User, id: string, q: Record<string, any>) {
     const { from, to } = this.range(q);
-    const user = this.s.user(u, id);
-    const row = this.s.store.get("SELECT manager_id FROM users WHERE id=?", id);
-    const manager = row?.manager_id
-      ? this.s.store.get("SELECT id,name FROM users WHERE id=?", row.manager_id)
-      : null;
-    const team = this.s.store.all(
-      "SELECT id,name,role FROM users WHERE tenant_id=? AND manager_id=? ORDER BY name",
-      u.tenantId,
-      id,
-    );
-    let territory: string | null = null;
-    if (user.territoryId) {
-      try {
-        const t = this.s.record(u, user.territoryId);
-        territory = t.name || null;
-      } catch {
-        territory = null;
-      }
-    }
-    const visits = this.s.list(u, "visit", { from, to, ownerId: id });
-    const own = (kind: string) =>
-      this.s.list(u, kind, { ownerId: id }).filter((r) => r.ownerId === id);
+    const user = await this.s.user(u, id);
+    const [
+      row,
+      team,
+      visits,
+      expenseRows,
+      leaveRows,
+      tourRows,
+      customerRows,
+      dcrs,
+      periodExpenses,
+      stock,
+      trackingToday,
+    ] = await Promise.all([
+      this.s.store.get("SELECT manager_id FROM users WHERE id=?", id),
+      this.s.store.all(
+        "SELECT id,name,role FROM users WHERE tenant_id=? AND manager_id=? ORDER BY name",
+        u.tenantId,
+        id,
+      ),
+      this.s.list(u, "visit", { from, to, ownerId: id }),
+      this.s.list(u, "expense", { ownerId: id }),
+      this.s.list(u, "leave", { ownerId: id }),
+      this.s.list(u, "tourplan", { ownerId: id }),
+      this.s.list(u, "customer", { ownerId: id }),
+      this.s.list(u, "dcr", { ownerId: id }),
+      this.s.list(u, "expense", { from, to, ownerId: id }),
+      this.s.inventory(u),
+      user.role === "rep" ? this.tracking.view(u, id, today()) : null,
+    ]);
+    const [manager, territoryRecord] = await Promise.all([
+      row?.manager_id
+        ? this.s.store.get(
+            "SELECT id,name FROM users WHERE id=?",
+            row.manager_id,
+          )
+        : null,
+      user.territoryId
+        ? this.s.record(u, user.territoryId).catch(() => null)
+        : null,
+    ]);
+    const territory: string | null = territoryRecord?.name || null;
+    const own = (rows: any[]) => rows.filter((r) => r.ownerId === id);
+    const customers = customerRows.filter((c) => c.assignedTo === id);
+    const expenses = periodExpenses;
     const countBy = (rows: any[]) =>
       rows.reduce(
         (a: Record<string, number>, r) => ({
@@ -634,13 +690,6 @@ export class Insights {
         }),
         {},
       );
-    const customers = this.s
-      .list(u, "customer", { ownerId: id })
-      .filter((c) => c.assignedTo === id);
-    const dcrs = this.s.list(u, "dcr", { ownerId: id });
-    const expenses = this.s.list(u, "expense", { from, to, ownerId: id });
-    const trackingToday =
-      user.role === "rep" ? this.tracking.view(u, id, today()) : null;
     return {
       user,
       manager,
@@ -659,10 +708,10 @@ export class Insights {
         workedDays: new Set(visits.map((v) => v.date)).size,
         expenses: round(sum(expenses, (e) => e.amount)),
         pendingApprovals: [
-          ...own("expense"),
-          ...own("leave"),
-          ...own("tourplan"),
-          ...dcrs,
+          ...own(expenseRows),
+          ...own(leaveRows),
+          ...own(tourRows),
+          ...own(dcrs),
         ].filter((r) => r.status === "pending").length,
       },
       customers: {
@@ -673,9 +722,9 @@ export class Insights {
           .length,
       },
       statuses: {
-        expense: countBy(own("expense")),
-        leave: countBy(own("leave")),
-        dcr: countBy(dcrs),
+        expense: countBy(own(expenseRows)),
+        leave: countBy(own(leaveRows)),
+        dcr: countBy(own(dcrs)),
       },
       recentVisits: visits.slice(0, 8).map((v) => ({
         id: v.id,
@@ -692,8 +741,7 @@ export class Insights {
         visits: r.visits ?? 0,
         pob: r.pob ?? 0,
       })),
-      inventory: this.s
-        .inventory(u)
+      inventory: stock
         .filter((i) => i.userId === id)
         .map((i) => ({
           name: i.name,

@@ -16,7 +16,7 @@ const pointSchema = z
   .strict();
 export class Tracking {
   constructor(private s: Service) {}
-  start(u: User, deviceId: string, startedAt = now()) {
+  async start(u: User, deviceId: string, startedAt = now()) {
     assert(
       !Number.isNaN(Date.parse(startedAt)),
       400,
@@ -30,7 +30,7 @@ export class Tracking {
       400,
       "Invalid device ID",
     );
-    const prior = this.s.store.get(
+    const prior = await this.s.store.get(
       "SELECT * FROM shifts WHERE tenant_id=? AND user_id=? AND ended_at IS NULL",
       u.tenantId,
       u.id,
@@ -57,12 +57,13 @@ export class Tracking {
       day: "2-digit",
     }).format(new Date(startedAt));
     assert(
-      this.s.list(u, "dayplan", { date: planDate, ownerId: u.id }).length > 0,
+      (await this.s.list(u, "dayplan", { date: planDate, ownerId: u.id }))
+        .length > 0,
       409,
       "Submit today’s day plan before starting tracking",
     );
     const id = randomUUID();
-    this.s.store.run(
+    await this.s.store.run(
       "INSERT INTO shifts VALUES(?,?,?,?,NULL,?)",
       id,
       u.tenantId,
@@ -70,11 +71,11 @@ export class Tracking {
       startedAt,
       deviceId,
     );
-    this.s.audit(u, "shift.started", id);
-    return this.s.store.get("SELECT * FROM shifts WHERE id=?", id);
+    await this.s.audit(u, "shift.started", id);
+    return await this.s.store.get("SELECT * FROM shifts WHERE id=?", id);
   }
-  shift(u: User, id: string) {
-    const row = this.s.store.get(
+  async shift(u: User, id: string) {
+    const row = await this.s.store.get(
       "SELECT * FROM shifts WHERE id=? AND tenant_id=? AND user_id=?",
       id,
       u.tenantId,
@@ -83,8 +84,8 @@ export class Tracking {
     assert(row, 404, "Shift not found");
     return row;
   }
-  end(u: User, id: string, endedAt = now()) {
-    const r = this.shift(u, id);
+  async end(u: User, id: string, endedAt = now()) {
+    const r = await this.shift(u, id);
     assert(!Number.isNaN(Date.parse(endedAt)), 400, "Invalid shift end time");
     endedAt = new Date(endedAt).toISOString();
     assert(
@@ -94,7 +95,7 @@ export class Tracking {
       400,
       "Invalid shift end time",
     );
-    const last = this.s.store.get(
+    const last = await this.s.store.get(
       "SELECT MAX(observed_at) AS time FROM points WHERE shift_id=?",
       id,
     );
@@ -104,13 +105,17 @@ export class Tracking {
       "Shift end cannot precede uploaded locations",
     );
     if (!r.ended_at) {
-      this.s.store.run("UPDATE shifts SET ended_at=? WHERE id=?", endedAt, id);
-      this.s.audit(u, "shift.ended", id);
+      await this.s.store.run(
+        "UPDATE shifts SET ended_at=? WHERE id=?",
+        endedAt,
+        id,
+      );
+      await this.s.audit(u, "shift.ended", id);
     }
-    return this.shift(u, id);
+    return await this.shift(u, id);
   }
-  points(u: User, id: string, input: any) {
-    const shift = this.shift(u, id);
+  async points(u: User, id: string, input: any) {
+    const shift = await this.shift(u, id);
     const batch = z.array(pointSchema).min(1).max(500).parse(input);
     let inserted = 0;
     for (const p of batch) {
@@ -124,11 +129,11 @@ export class Tracking {
         "Location time falls outside the shift",
       );
       assert(
-        Date.now() - t <= this.s.policies(u).retentionDays * 86400000,
+        Date.now() - t <= (await this.s.policies(u)).retentionDays * 86400000,
         400,
         "Location is outside the retention period",
       );
-      const old = this.s.store.get(
+      const old = await this.s.store.get(
         "SELECT * FROM points WHERE tenant_id=? AND user_id=? AND id=?",
         u.tenantId,
         u.id,
@@ -147,7 +152,7 @@ export class Tracking {
         );
         continue;
       }
-      this.s.store.run(
+      await this.s.store.run(
         "INSERT INTO points VALUES(?,?,?,?,?,?,?,?,?,?,?)",
         p.id,
         u.tenantId,
@@ -165,8 +170,8 @@ export class Tracking {
     }
     return { accepted: batch.length, inserted };
   }
-  event(u: User, id: string, event: string, observedAt: string) {
-    this.shift(u, id);
+  async event(u: User, id: string, event: string, observedAt: string) {
+    await this.shift(u, id);
     assert(
       [
         "location_disabled",
@@ -185,7 +190,7 @@ export class Tracking {
       400,
       "Invalid event time",
     );
-    this.s.store.run(
+    await this.s.store.run(
       "INSERT INTO device_events VALUES(?,?,?,?,?,?)",
       randomUUID(),
       u.tenantId,
@@ -196,19 +201,19 @@ export class Tracking {
     );
     return { ok: true };
   }
-  view(u: User, userId: string, date: string) {
-    this.s.user(u, userId);
+  async view(u: User, userId: string, date: string) {
+    await this.s.user(u, userId);
     assert(/^\d{4}-\d{2}-\d{2}$/.test(date), 400, "Invalid date");
     const from = new Date(date + "T00:00:00+05:30").toISOString(),
       to = new Date(new Date(from).getTime() + 86400000).toISOString();
-    const points = this.s.store.all(
+    const points = await this.s.store.all(
       "SELECT * FROM points WHERE tenant_id=? AND user_id=? AND observed_at>=? AND observed_at<? ORDER BY observed_at,id",
       u.tenantId,
       userId,
       from,
       to,
     );
-    const maxGap = this.s.policies(u).staleAfterMinutes * 60000;
+    const maxGap = (await this.s.policies(u)).staleAfterMinutes * 60000;
     const gaps = [];
     let km = 0;
     for (let i = 1; i < points.length; i++) {
@@ -224,8 +229,8 @@ export class Tracking {
       if (
         !a.mocked &&
         !b.mocked &&
-        a.accuracy <= this.s.policies(u).maxAccuracyMeters &&
-        b.accuracy <= this.s.policies(u).maxAccuracyMeters &&
+        a.accuracy <= (await this.s.policies(u)).maxAccuracyMeters &&
+        b.accuracy <= (await this.s.policies(u)).maxAccuracyMeters &&
         duration <= maxGap
       )
         km +=
@@ -233,7 +238,7 @@ export class Tracking {
           1000;
     }
     const last = points.at(-1);
-    const shift = this.s.store.get(
+    const shift = await this.s.store.get(
       "SELECT * FROM shifts WHERE tenant_id=? AND user_id=? AND started_at<? AND (ended_at IS NULL OR ended_at>=?) ORDER BY started_at DESC LIMIT 1",
       u.tenantId,
       userId,
@@ -258,7 +263,7 @@ export class Tracking {
       lastFix: last ?? null,
       state,
       shift: shift ?? null,
-      events: this.s.store.all(
+      events: await this.s.store.all(
         "SELECT * FROM device_events WHERE tenant_id=? AND user_id=? AND observed_at>=? AND observed_at<? ORDER BY observed_at",
         u.tenantId,
         userId,
@@ -267,13 +272,13 @@ export class Tracking {
       ),
     };
   }
-  overview(u: User, date: string) {
-    return this.s
-      .users(u)
-      .filter((x) => x.role === "rep")
-      .map((user) => {
-        const r = this.view(u, user.id, date);
+  async overview(u: User, date: string) {
+    const reps = (await this.s.users(u)).filter((x) => x.role === "rep");
+    return Promise.all(
+      reps.map(async (user) => {
+        const r = await this.view(u, user.id, date);
         return { ...r, points: undefined, events: undefined, name: user.name };
-      });
+      }),
+    );
   }
 }

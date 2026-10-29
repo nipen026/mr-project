@@ -11,7 +11,8 @@ import {
   Modal,
   Notice,
   PageTitle,
-  Spinner,
+  PageSkeleton,
+  ContentSkeleton,
   Table,
   downloadCsv,
   useResource,
@@ -39,7 +40,7 @@ export function Overview() {
     [date, owner, version],
   );
   const [detail, setDetail] = useState<RecordData>();
-  if (loading) return <Spinner />;
+  if (loading) return <PageSkeleton />;
   if (error) return <Notice tone="error">{error}</Notice>;
   return (
     <>
@@ -57,23 +58,12 @@ export function Overview() {
         }
         actions={
           <>
-            <Button
-              secondary
-              onClick={() =>
-                downloadCsv("field-snapshot.csv", [
-                  {
-                    date: d.date,
-                    active: d.active,
-                    representatives: d.users,
-                    doctorCalls: d.doctorCalls,
-                    dcrSubmitted: d.dcrSubmitted,
-                    pob: d.pob,
-                  },
-                ])
-              }
+            <a
+              className="button secondary"
+              href={`/api/exports/report:productivity?from=${d.from}&to=${d.to}`}
             >
               Export snapshot
-            </Button>
+            </a>
             <Link className="button" to="/tracking">
               View live activity
             </Link>
@@ -438,7 +428,7 @@ export function Approvals() {
         <Link to="/exceptions">Visit exceptions</Link>
       </div>
       {loading ? (
-        <Spinner />
+        <ContentSkeleton metrics={0} />
       ) : error ? (
         <Notice tone="error">{error}</Notice>
       ) : (
@@ -757,7 +747,7 @@ export function Inventory() {
         <Link to="/module/challan">Challan receipts</Link>
       </div>
       {loading ? (
-        <Spinner />
+        <ContentSkeleton metrics={0} />
       ) : error ? (
         <Notice tone="error">{error}</Notice>
       ) : (
@@ -862,7 +852,7 @@ function GenericReport({ type, query }: { type: string; query: string }) {
     () => api("/reports/" + type + query),
     [type, query, version],
   );
-  if (loading) return <Spinner />;
+  if (loading) return <ContentSkeleton metrics={0} />;
   if (error) return <Notice tone="error">{error}</Notice>;
   return (
     <section className="card no-padding">
@@ -908,7 +898,7 @@ export function Activity() {
         ))}
       </div>
       {loading ? (
-        <Spinner />
+        <ContentSkeleton metrics={0} />
       ) : error ? (
         <Notice tone="error">{error}</Notice>
       ) : (

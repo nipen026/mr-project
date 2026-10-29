@@ -70,13 +70,101 @@ export function Empty({
     </div>
   );
 }
-export function Spinner() {
+/** One shimmering placeholder block. Size it with the props or a parent grid. */
+export function Skeleton({
+  w = "100%",
+  h = 16,
+  r = 8,
+}: {
+  w?: number | string;
+  h?: number | string;
+  r?: number;
+}) {
   return (
-    <div className="loading" role="status">
-      <span className="spin" />
-      Loading workspace…
+    <span
+      className="skeleton"
+      aria-hidden="true"
+      style={{ width: w, height: h, borderRadius: r }}
+    />
+  );
+}
+/** Placeholder for the body of a screen: optional metric cards and a table. */
+export function ContentSkeleton({
+  metrics = 4,
+  rows = 6,
+}: {
+  metrics?: number;
+  rows?: number;
+}) {
+  return (
+    <div className="skeleton-wrap" role="status" aria-busy="true">
+      <span className="sr-only">Loading</span>
+      {metrics > 0 && (
+        <div className="skeleton-metrics">
+          {Array.from({ length: metrics }, (_, i) => (
+            <div className="skeleton-card" key={i}>
+              <Skeleton w="45%" h={12} />
+              <Skeleton w="60%" h={28} />
+              <Skeleton w="35%" h={10} />
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="skeleton-card skeleton-table">
+        <Skeleton w="30%" h={16} />
+        {Array.from({ length: rows }, (_, i) => (
+          <div className="skeleton-row" key={i}>
+            <Skeleton w="18%" h={14} />
+            <Skeleton w="26%" h={14} />
+            <Skeleton w="20%" h={14} />
+            <Skeleton w="12%" h={14} />
+          </div>
+        ))}
+      </div>
     </div>
   );
+}
+/** A whole screen before its title is known. */
+export function PageSkeleton() {
+  return (
+    <div className="skeleton-page">
+      <Skeleton w={120} h={12} />
+      <Skeleton w="38%" h={34} r={10} />
+      <Skeleton w="52%" h={14} />
+      <div className="skeleton-card skeleton-filter">
+        <Skeleton h={38} />
+        <Skeleton h={38} />
+        <Skeleton h={38} />
+      </div>
+      <ContentSkeleton />
+    </div>
+  );
+}
+/** The signed-in shell (sidebar, top bar, page) while the workspace loads. */
+export function AppSkeleton() {
+  return (
+    <div className="skeleton-app" role="status" aria-busy="true">
+      <span className="sr-only">Loading workspace</span>
+      <aside className="skeleton-side">
+        <Skeleton w="70%" h={28} r={10} />
+        {Array.from({ length: 10 }, (_, i) => (
+          <Skeleton key={i} h={34} r={10} />
+        ))}
+      </aside>
+      <div className="skeleton-main">
+        <div className="skeleton-top">
+          <Skeleton w="22%" h={14} />
+          <Skeleton w="38%" h={40} r={20} />
+          <Skeleton w={40} h={40} r={20} />
+        </div>
+        <PageSkeleton />
+      </div>
+    </div>
+  );
+}
+/** Kept for screens that load a whole page. */
+export function Spinner() {
+  return <PageSkeleton />;
 }
 export function Modal({
   title,

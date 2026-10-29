@@ -17,7 +17,7 @@ import "@fontsource/manrope/800.css";
 import "./styles.css";
 import { api, json } from "./api";
 import { WorkspaceContext, type Workspace } from "./context";
-import { Button, Icon, Notice, Spinner } from "./ui";
+import { AppSkeleton, Button, Icon, Notice } from "./ui";
 import {
   Activity,
   Approvals,
@@ -48,7 +48,7 @@ function App() {
     window.addEventListener("session-expired", expired);
     return () => window.removeEventListener("session-expired", expired);
   }, []);
-  if (user === undefined) return <Spinner />;
+  if (user === undefined) return <AppSkeleton />;
   if (!user) return <Login onSuccess={setUser} />;
   if (user.mustChangePassword)
     return (
@@ -239,7 +239,7 @@ function WorkspaceApp({ user, logout }: { user: User; logout: () => void }) {
         <Button onClick={() => location.reload()}>Retry</Button>
       </div>
     );
-  if (!workspace) return <Spinner />;
+  if (!workspace) return <AppSkeleton />;
   return (
     <WorkspaceContext.Provider
       value={{ workspace, refresh, notify: setToast, version }}

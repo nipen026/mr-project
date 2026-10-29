@@ -17,6 +17,8 @@ npm start
 
 Open **http://127.0.0.1:4000**. The demo seed runs only on an empty development database. Never seed a live company database.
 
+**Database.** By default the API uses a local SQLite file. To use PostgreSQL, set `DATABASE_URL` in `.env` (see `.env.example`); `npm run seed:realistic` then loads a large fictional company (15 people, about 470 customers, four weeks of visits, orders, expenses, reports and tracking) into an empty database. Sign in with company code **VIDYA** and the password above.
+
 Development with hot reload: `npm run dev` → http://127.0.0.1:5173.
 
 Demo company code: **VIDYA**. Local demonstration password: **Demo-only-2026!**

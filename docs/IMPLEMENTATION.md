@@ -18,7 +18,7 @@ Source: reviewed Figma `zSHQ1nfFnGLMCKUBhTSUwz` and `review/requirements.md`. No
 
 ## Architecture
 
-Node 24 / TypeScript / Fastify, React 19 + Vite, Kotlin + Jetpack Compose. SQLite in WAL mode provides a reproducible local installation and single-server persistent deployment. Horizontal API scaling needs a PostgreSQL migration/load test and is not claimed by this delivery. The service encapsulates storage to keep that migration possible.
+Node 24 / TypeScript / Fastify, React 19 + Vite, Kotlin + Jetpack Compose. Storage runs on SQLite (WAL, local file) or PostgreSQL behind one asynchronous `Store` interface in `apps/api/src/db.ts`. Set `DATABASE_URL` for PostgreSQL; otherwise `DATABASE_PATH` selects SQLite. Writers are serialized (SQLite `BEGIN IMMEDIATE`, PostgreSQL advisory lock), reads are batched per screen and cached for a few seconds, and any write clears the cache. Running several API replicas is still not claimed: the cache and write lock are per process and the PostgreSQL behaviour has not been load tested.
 
 Fully managed company phones are the intended fleet. Exact device, management platform and licence selection are deferred. Tracking starts with an explicit shift action and visible notification. No covert tracking or guaranteed recovery from Android Force Stop. Production signing, domain/HTTPS, external ERP/mail/push credentials and physical handset tests remain deployment work until available. Integrations without credentials must report unconfigured, never simulated success.
 

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -28,8 +29,13 @@ const result = async (
 };
 let customer: any, plan: any, campaign: any;
 before(async () => {
+  // Set TEST_DATABASE_URL (a direct PostgreSQL URL) to run against PostgreSQL
+  // in a throwaway schema instead of a temporary SQLite file.
+  if (process.env.TEST_DATABASE_URL)
+    process.env.DATABASE_SCHEMA =
+      "mrtest_" + randomUUID().replaceAll("-", "").slice(0, 12);
   ctx = await buildApp({
-    databasePath: join(temp, "db.sqlite"),
+    databasePath: process.env.TEST_DATABASE_URL || join(temp, "db.sqlite"),
     uploads: join(temp, "uploads"),
     serveWeb: false,
   });
@@ -55,6 +61,7 @@ before(async () => {
   campaign = (await result("GET", "/records/campaign")).items[0];
 });
 after(async () => {
+  await ctx.store.destroy();
   await ctx.app.close();
   rmSync(temp, { recursive: true, force: true });
 });
@@ -380,4 +387,31 @@ test("pending reports list unreported dates and drop them once submitted", async
   assert.ok(!done.items.some((x: any) => x.date === item.date));
   const manager = await result("GET", "/dcr/pending", undefined, "manager");
   assert.equal(manager.summary.total, 0);
+});
+test("roles matrix comes from the enforced rules and performance matches the profile", async () => {
+  const roles = (await result("GET", "/roles", undefined, "manager")).items;
+  assert.deepEqual(
+    roles.map((r: any) => r.role),
+    ["admin", "manager", "rep"],
+  );
+  const admin = roles.find((r: any) => r.role === "admin");
+  const rep = roles.find((r: any) => r.role === "rep");
+  assert.ok(admin.modulesWrite > rep.modulesWrite);
+  assert.equal(rep.people, 2);
+  assert.equal((await req("GET", "/roles", undefined, "none")).statusCode, 401);
+  const mine = await result("GET", "/performance", undefined, "aman");
+  const me = (await result("GET", "/auth/me", undefined, "aman")).user;
+  const profile = await result(
+    "GET",
+    `/users/${me.id}/profile`,
+    undefined,
+    "manager",
+  );
+  assert.deepEqual(mine.kpis, profile.kpis);
+  assert.ok(mine.customers.total >= 1);
+  assert.equal(
+    (await req("GET", "/performance?from=2026-02-30", undefined, "aman"))
+      .statusCode,
+    400,
+  );
 });

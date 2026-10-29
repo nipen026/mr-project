@@ -56,8 +56,9 @@ export async function buildApp(
     serveWeb?: boolean;
   } = {},
 ) {
-  const store = new Store(
+  const store = await Store.open(
     options.databasePath ||
+      process.env.DATABASE_URL ||
       process.env.DATABASE_PATH ||
       ".data/mr-connect.sqlite",
   );
@@ -74,6 +75,10 @@ export async function buildApp(
     logger: options.logger ?? false,
     bodyLimit: 1024 * 1024,
     trustProxy: process.env.TRUST_PROXY === "1",
+  });
+  // Every request gets its own read cache, cleared by any write.
+  app.addHook("onRequest", (_r, _reply, done) => {
+    store.scoped(done);
   });
   await app.register(cookie);
   await app.register(helmet, {
@@ -131,7 +136,7 @@ export async function buildApp(
         "A trusted request origin is required",
       );
     const hash = tokenHash(token);
-    const session = store.get(
+    const session = await store.get(
       "SELECT u.*,s.expires_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=?",
       hash,
     );
@@ -205,7 +210,7 @@ export async function buildApp(
   app.get("/api/health", async () => ({
     status: "ok",
     version: "0.1.0",
-    database: !!store.get("SELECT 1 AS ok").ok,
+    database: !!(await store.get("SELECT 1 AS ok")).ok,
   }));
   app.post(
     "/api/auth/login",
@@ -219,7 +224,7 @@ export async function buildApp(
           client: z.enum(["web", "android"]).optional(),
         })
         .parse(r.body);
-      const user = store.get(
+      const user = await store.get(
         "SELECT u.* FROM users u JOIN tenants t ON t.id=u.tenant_id WHERE upper(t.code)=? AND lower(u.email)=?",
         b.companyCode.toUpperCase(),
         b.email.toLowerCase(),
@@ -237,16 +242,16 @@ export async function buildApp(
       const token = newToken(),
         hash = tokenHash(token),
         expires = new Date(Date.now() + 12 * 3600000).toISOString();
-      store.transaction(() => {
-        store.run("DELETE FROM sessions WHERE expires_at<?", now());
-        store.run(
+      await store.transaction(async () => {
+        await store.run("DELETE FROM sessions WHERE expires_at<?", now());
+        await store.run(
           "INSERT INTO sessions VALUES(?,?,?,?)",
           hash,
           user.id,
           expires,
           now(),
         );
-        service.audit(publicUser(user), "session.created", user.id);
+        await service.audit(publicUser(user), "session.created", user.id);
       });
       reply.setCookie("mr_session", token, {
         path: "/",
@@ -266,7 +271,7 @@ export async function buildApp(
     "/api/auth/access-help",
     { config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } },
     async (r) =>
-      support.accessRequest(
+      await support.accessRequest(
         z
           .object({
             companyCode: z.string().max(40),
@@ -278,7 +283,7 @@ export async function buildApp(
   );
   app.get("/api/auth/me", async (r) => ({ user: r.user }));
   app.post("/api/auth/logout", async (r, reply) => {
-    store.run("DELETE FROM sessions WHERE hash=?", r.sessionHash);
+    await store.run("DELETE FROM sessions WHERE hash=?", r.sessionHash);
     reply.clearCookie("mr_session", { path: "/" });
     return { ok: true };
   });
@@ -289,55 +294,65 @@ export async function buildApp(
         newPassword: z.string().min(12).max(256),
       })
       .parse(r.body);
-    const u = store.get("SELECT * FROM users WHERE id=?", r.user.id);
+    const u = await store.get("SELECT * FROM users WHERE id=?", r.user.id);
     assert(
       await verifyPassword(b.currentPassword, u.password_hash),
       400,
       "Current password is incorrect",
     );
     const hash = await hashPassword(b.newPassword);
-    store.transaction(() => {
-      store.run(
+    await store.transaction(async () => {
+      await store.run(
         "UPDATE users SET password_hash=?,must_change=0,version=version+1 WHERE id=?",
         hash,
         r.user.id,
       );
-      store.run("DELETE FROM sessions WHERE user_id=?", r.user.id);
-      service.audit(r.user, "password.changed", r.user.id);
+      await store.run("DELETE FROM sessions WHERE user_id=?", r.user.id);
+      await service.audit(r.user, "password.changed", r.user.id);
     });
     reply.clearCookie("mr_session", { path: "/" });
     return { ok: true, message: "Password changed. Sign in again." };
   });
   app.get("/api/catalog", async (r) => ({
     modules: modules.filter((m) => !m.adminOnly || r.user.role === "admin"),
-    policies: service.policies(r.user),
+    policies: await service.policies(r.user),
     reportNames: reportNames.filter(
       (n) => n !== "audit" || r.user.role === "admin",
     ),
   }));
-  app.get("/api/bootstrap", async (r) => ({
-    user: r.user,
-    company: store.get(
-      "SELECT code,name FROM tenants WHERE id=?",
-      r.user.tenantId,
-    ),
-    policies: service.policies(r.user),
-    preferences: support.preferences(r.user),
-    modules: modules.filter((m) => !m.adminOnly || r.user.role === "admin"),
-    users: service.users(r.user),
-    records: Object.fromEntries(
-      modules
-        .filter((m) => !m.adminOnly || r.user.role === "admin")
-        .map((m) => [m.key, service.list(r.user, m.key)]),
-    ),
-    inventory: service.inventory(r.user),
-    activeShift:
-      store.get(
-        "SELECT * FROM shifts WHERE user_id=? AND ended_at IS NULL",
-        r.user.id,
-      ) || null,
-  }));
-  app.get("/api/users", async (r) => ({ items: service.users(r.user) }));
+  app.get("/api/bootstrap", async (r) => {
+    const visibleModules = modules.filter(
+      (m) => !m.adminOnly || r.user.role === "admin",
+    );
+    // Independent reads run together, so the screen costs one round trip.
+    const [company, policies, preferences, users, lists, inventory, shift] =
+      await Promise.all([
+        store.get("SELECT code,name FROM tenants WHERE id=?", r.user.tenantId),
+        service.policies(r.user),
+        support.preferences(r.user),
+        service.users(r.user),
+        Promise.all(visibleModules.map((m) => service.list(r.user, m.key))),
+        service.inventory(r.user),
+        store.get(
+          "SELECT * FROM shifts WHERE user_id=? AND ended_at IS NULL",
+          r.user.id,
+        ),
+      ]);
+    return {
+      user: r.user,
+      company,
+      policies,
+      preferences,
+      modules: visibleModules,
+      users,
+      records: Object.fromEntries(
+        visibleModules.map((m, i) => [m.key, lists[i]]),
+      ),
+      inventory,
+      activeShift: shift || null,
+    };
+  });
+  app.get("/api/users", async (r) => ({ items: await service.users(r.user) }));
   const userBody = z
     .object({
       name: z.string().trim().min(2).max(100),
@@ -356,7 +371,7 @@ export async function buildApp(
     const uid = creating ? randomUUID() : id(r);
     let current: any;
     if (!creating) {
-      current = store.get(
+      current = await store.get(
         "SELECT * FROM users WHERE id=? AND tenant_id=?",
         uid,
         r.user.tenantId,
@@ -376,7 +391,7 @@ export async function buildApp(
         );
     }
     if (b.managerId) {
-      const m = store.get(
+      const m = await store.get(
         "SELECT * FROM users WHERE id=? AND tenant_id=? AND active=1",
         b.managerId,
         r.user.tenantId,
@@ -392,13 +407,16 @@ export async function buildApp(
         );
         seen.add(ancestor.id);
         ancestor = ancestor.manager_id
-          ? store.get("SELECT * FROM users WHERE id=?", ancestor.manager_id)
+          ? await store.get(
+              "SELECT * FROM users WHERE id=?",
+              ancestor.manager_id,
+            )
           : null;
       }
     }
     if (b.territoryId)
       assert(
-        service.record(r.user, b.territoryId).kind === "territory",
+        (await service.record(r.user, b.territoryId)).kind === "territory",
         400,
         "Invalid territory",
       );
@@ -406,9 +424,9 @@ export async function buildApp(
     const hash = b.password
       ? await hashPassword(b.password)
       : current.password_hash;
-    return store.transaction(() => {
+    return await store.transaction(async () => {
       if (creating)
-        store.run(
+        await store.run(
           "INSERT INTO users(id,tenant_id,email,name,role,manager_id,territory_id,password_hash,active,must_change) VALUES(?,?,?,?,?,?,?,?,?,1)",
           uid,
           r.user.tenantId,
@@ -421,7 +439,7 @@ export async function buildApp(
           Number(b.active),
         );
       else {
-        store.run(
+        await store.run(
           "UPDATE users SET email=?,name=?,role=?,manager_id=?,territory_id=?,password_hash=?,active=?,must_change=?,version=version+1 WHERE id=?",
           b.email.toLowerCase(),
           b.name,
@@ -434,16 +452,16 @@ export async function buildApp(
           uid,
         );
         if (b.password || !b.active || b.role !== current.role)
-          store.run("DELETE FROM sessions WHERE user_id=?", uid);
+          await store.run("DELETE FROM sessions WHERE user_id=?", uid);
       }
-      service.audit(
+      await service.audit(
         r.user,
         creating ? "employee.created" : "employee.updated",
         uid,
         { role: b.role, active: b.active },
       );
       return {
-        ...publicUser(store.get("SELECT * FROM users WHERE id=?", uid)),
+        ...publicUser(await store.get("SELECT * FROM users WHERE id=?", uid)),
         version: creating ? 1 : current.version + 1,
       };
     });
@@ -451,36 +469,36 @@ export async function buildApp(
   app.post("/api/users", async (r) => saveUser(r, true));
   app.put("/api/users/:id", async (r) => saveUser(r, false));
   app.post("/api/import/customers", async (r) =>
-    mutate(r, () => {
+    mutate(r, async () => {
       const b = z
         .object({
           rows: z.array(z.record(z.string(), z.unknown())).min(1).max(1000),
         })
         .parse(r.body);
-      return {
-        items: b.rows.map((row, i) => {
-          try {
-            return service.create(r.user, "customer", row);
-          } catch (e) {
-            throw new HttpError(
-              (e as any).statusCode || 400,
-              "Row " + (i + 2) + ": " + (e as Error).message,
-            );
-          }
-        }),
-      };
+      const items = [];
+      for (const [i, row] of b.rows.entries()) {
+        try {
+          items.push(await service.create(r.user, "customer", row));
+        } catch (e) {
+          throw new HttpError(
+            (e as any).statusCode || 400,
+            "Row " + (i + 2) + ": " + (e as Error).message,
+          );
+        }
+      }
+      return { items };
     }),
   );
   app.get("/api/records/:kind", async (r) => ({
-    items: service.list(r.user, (r.params as any).kind, r.query as any),
+    items: await service.list(r.user, (r.params as any).kind, r.query as any),
   }));
   app.get("/api/record/:id", async (r) => ({
-    item: service.record(r.user, id(r)),
+    item: await service.record(r.user, id(r)),
   }));
   app.post("/api/records/:kind", async (r) =>
-    mutate(r, () => {
+    mutate(r, async () => {
       const b = r.body as any;
-      return service.create(
+      return await service.create(
         r.user,
         (r.params as any).kind,
         b.data ?? b,
@@ -489,36 +507,40 @@ export async function buildApp(
     }),
   );
   app.put("/api/record/:id", async (r) =>
-    mutate(r, () => {
+    mutate(r, async () => {
       const b = z
         .object({
           data: z.record(z.string(), z.unknown()),
           version: z.number().int(),
         })
         .parse(r.body);
-      return service.update(r.user, id(r), b.data, b.version);
+      return await service.update(r.user, id(r), b.data, b.version);
     }),
   );
   app.delete("/api/record/:id", async (r) =>
-    mutate(r, () =>
-      service.remove(
-        r.user,
-        id(r),
-        z.object({ version: z.number().int() }).parse(r.body).version,
-      ),
+    mutate(
+      r,
+      async () =>
+        await service.remove(
+          r.user,
+          id(r),
+          z.object({ version: z.number().int() }).parse(r.body).version,
+        ),
     ),
   );
   app.post("/api/record/:id/submit", async (r) =>
-    mutate(r, () =>
-      service.submit(
-        r.user,
-        id(r),
-        z.object({ version: z.number().int() }).parse(r.body).version,
-      ),
+    mutate(
+      r,
+      async () =>
+        await service.submit(
+          r.user,
+          id(r),
+          z.object({ version: z.number().int() }).parse(r.body).version,
+        ),
     ),
   );
   app.post("/api/record/:id/decision", async (r) =>
-    mutate(r, () => {
+    mutate(r, async () => {
       const b = z
         .object({
           version: z.number().int(),
@@ -526,11 +548,11 @@ export async function buildApp(
           reason: z.string().max(2000).default(""),
         })
         .parse(r.body);
-      return service.decide(r.user, id(r), b.action, b.reason, b.version);
+      return await service.decide(r.user, id(r), b.action, b.reason, b.version);
     }),
   );
   app.post("/api/record/:id/acknowledge", async (r) =>
-    mutate(r, () => {
+    mutate(r, async () => {
       const b = z
         .object({
           version: z.number().int(),
@@ -548,71 +570,77 @@ export async function buildApp(
     }),
   );
   app.post("/api/visits", async (r) =>
-    mutate(r, () => service.visit(r.user, r.body)),
+    mutate(r, async () => await service.visit(r.user, r.body)),
   );
   app.post("/api/dcr", async (r) =>
-    mutate(r, () => {
+    mutate(r, async () => {
       const b = z
         .object({ date: z.string(), remarks: z.string().max(5000).default("") })
         .parse(r.body);
-      return service.dcr(r.user, b.date, b.remarks);
+      return await service.dcr(r.user, b.date, b.remarks);
     }),
   );
   app.get("/api/approvals", async (r) => ({
-    items: service.approvals(r.user),
+    items: await service.approvals(r.user),
   }));
   app.get("/api/inventory", async (r) => ({
-    items: service.inventory(r.user),
+    items: await service.inventory(r.user),
   }));
-  app.get("/api/dashboard", async (r) =>
-    service.dashboard(r.user, r.query as any),
+  app.get(
+    "/api/dashboard",
+    async (r) => await service.dashboard(r.user, r.query as any),
   );
   app.get("/api/tracking", async (r) => ({
-    items: tracking.overview(r.user, (r.query as any).date || today()),
+    items: await tracking.overview(r.user, (r.query as any).date || today()),
   }));
-  app.get("/api/tracking/:id", async (r) =>
-    tracking.view(r.user, id(r), (r.query as any).date || today()),
+  app.get(
+    "/api/tracking/:id",
+    async (r) =>
+      await tracking.view(r.user, id(r), (r.query as any).date || today()),
   );
   app.get("/api/shifts/active", async (r) => ({
     shift:
-      store.get(
+      (await store.get(
         "SELECT * FROM shifts WHERE tenant_id=? AND user_id=? AND ended_at IS NULL",
         r.user.tenantId,
         r.user.id,
-      ) ?? null,
+      )) ?? null,
   }));
   app.post("/api/shifts/start", async (r) =>
-    mutate(r, () =>
-      (() => {
-        const b = z
-          .object({
-            deviceId: z.string(),
-            startedAt: z.iso.datetime().optional(),
-          })
-          .parse(r.body);
-        return tracking.start(r.user, b.deviceId, b.startedAt);
-      })(),
-    ),
+    mutate(r, async () => {
+      const b = z
+        .object({
+          deviceId: z.string(),
+          startedAt: z.iso.datetime().optional(),
+        })
+        .parse(r.body);
+      return tracking.start(r.user, b.deviceId, b.startedAt);
+    }),
   );
   app.post("/api/shifts/:id/end", async (r) =>
-    mutate(r, () =>
-      tracking.end(
-        r.user,
-        id(r),
-        z.object({ endedAt: z.iso.datetime().optional() }).parse(r.body ?? {})
-          .endedAt,
-      ),
+    mutate(
+      r,
+      async () =>
+        await tracking.end(
+          r.user,
+          id(r),
+          z.object({ endedAt: z.iso.datetime().optional() }).parse(r.body ?? {})
+            .endedAt,
+        ),
     ),
   );
   app.post("/api/shifts/:id/points", async (r) =>
-    mutate(r, () => tracking.points(r.user, id(r), (r.body as any)?.points)),
+    mutate(
+      r,
+      async () => await tracking.points(r.user, id(r), (r.body as any)?.points),
+    ),
   );
   app.post("/api/shifts/:id/events", async (r) =>
-    mutate(r, () => {
+    mutate(r, async () => {
       const b = z
         .object({ event: z.string(), observedAt: z.iso.datetime() })
         .parse(r.body);
-      return tracking.event(r.user, id(r), b.event, b.observedAt);
+      return await tracking.event(r.user, id(r), b.event, b.observedAt);
     }),
   );
   app.get("/api/reports/:type", async (r, reply) => {
@@ -620,7 +648,7 @@ export async function buildApp(
     assert(reportNames.includes(type), 404, "Report not found");
     if (type === "audit")
       assert(r.user.role === "admin", 403, "Administrator access required");
-    const rows = report(service, r.user, type, r.query as any)!;
+    const rows = await report(service, r.user, type, r.query as any);
     if ((r.query as any).format === "csv")
       return reply
         .header(
@@ -631,13 +659,14 @@ export async function buildApp(
         .send(csv(rows));
     return { items: rows };
   });
-  app.get("/api/exports", async (r) =>
-    insights.exportCatalog(r.user, r.query as any),
+  app.get(
+    "/api/exports",
+    async (r) => await insights.exportCatalog(r.user, r.query as any),
   );
   app.get("/api/exports/:key", async (r, reply) => {
     const key = (r.params as any).key as string;
-    const rows = insights.exportRows(r.user, key, r.query as any);
-    insights.recordExport(r.user, key, r.query as any, rows.length);
+    const rows = await insights.exportRows(r.user, key, r.query as any);
+    await insights.recordExport(r.user, key, r.query as any, rows.length);
     return reply
       .header(
         "Content-Disposition",
@@ -646,18 +675,23 @@ export async function buildApp(
       .type("text/csv; charset=utf-8")
       .send(csv(rows));
   });
-  app.get("/api/orders", async (r) => insights.orders(r.user, r.query as any));
-  app.get("/api/orders/:id", async (r) => ({
-    item: insights.order(r.user, id(r)),
-  }));
-  app.get("/api/exceptions", async (r) =>
-    insights.exceptions(r.user, r.query as any),
+  app.get(
+    "/api/orders",
+    async (r) => await insights.orders(r.user, r.query as any),
   );
-  app.get("/api/visits/:id/evidence", async (r) =>
-    insights.evidence(r.user, id(r)),
+  app.get("/api/orders/:id", async (r) => ({
+    item: await insights.order(r.user, id(r)),
+  }));
+  app.get(
+    "/api/exceptions",
+    async (r) => await insights.exceptions(r.user, r.query as any),
+  );
+  app.get(
+    "/api/visits/:id/evidence",
+    async (r) => await insights.evidence(r.user, id(r)),
   );
   app.post("/api/visits/:id/review", async (r) =>
-    mutate(r, () => {
+    mutate(r, async () => {
       const b = z
         .object({
           decision: z.enum(["accept", "flag"]),
@@ -665,54 +699,77 @@ export async function buildApp(
         })
         .strict()
         .parse(r.body);
-      return insights.reviewVisit(r.user, id(r), b);
+      return await insights.reviewVisit(r.user, id(r), b);
     }),
   );
-  app.get("/api/analytics/:type", async (r) =>
-    insights.analytics(r.user, (r.params as any).type, r.query as any),
+  app.get(
+    "/api/analytics/:type",
+    async (r) =>
+      await insights.analytics(r.user, (r.params as any).type, r.query as any),
   );
-  app.get("/api/users/:id/profile", async (r) =>
-    insights.profile(r.user, id(r), r.query as any),
+  app.get(
+    "/api/users/:id/profile",
+    async (r) => await insights.profile(r.user, id(r), r.query as any),
   );
-  app.get("/api/support", async (r) => support.help(r.user));
+  app.get("/api/support", async (r) => await support.help(r.user));
   app.get("/api/support/tickets", async (r) => ({
-    items: support.tickets(r.user, r.query as any),
+    items: await support.tickets(r.user, r.query as any),
   }));
   app.post("/api/support/tickets", async (r) =>
-    mutate(r, () => support.createTicket(r.user, ticketBody.parse(r.body))),
+    mutate(
+      r,
+      async () => await support.createTicket(r.user, ticketBody.parse(r.body)),
+    ),
   );
   app.put("/api/support/tickets/:id", async (r) =>
-    mutate(r, () =>
-      support.updateTicket(r.user, id(r), ticketUpdate.parse(r.body)),
+    mutate(
+      r,
+      async () =>
+        await support.updateTicket(r.user, id(r), ticketUpdate.parse(r.body)),
     ),
   );
   app.get("/api/access", async (r) => support.access(r.user));
-  app.get("/api/preferences", async (r) => support.preferences(r.user));
-  app.put("/api/preferences", async (r) =>
-    support.setPreferences(r.user, preferencesBody.parse(r.body)),
+  app.get("/api/roles", async (r) => support.roles(r.user));
+  app.get("/api/performance", async (r) =>
+    insights.performance(r.user, r.query as any),
   );
-  app.get("/api/customers/:id/addresses", async (r) =>
-    fieldops.addresses(r.user, id(r)),
+  app.get("/api/preferences", async (r) => await support.preferences(r.user));
+  app.put(
+    "/api/preferences",
+    async (r) =>
+      await support.setPreferences(r.user, preferencesBody.parse(r.body)),
+  );
+  app.get(
+    "/api/customers/:id/addresses",
+    async (r) => await fieldops.addresses(r.user, id(r)),
   );
   app.post("/api/customers/:id/addresses", async (r) =>
-    mutate(r, () =>
-      fieldops.addAddress(r.user, id(r), addressBody.parse(r.body)),
+    mutate(
+      r,
+      async () =>
+        await fieldops.addAddress(r.user, id(r), addressBody.parse(r.body)),
     ),
   );
   app.put("/api/customer-addresses/:id", async (r) =>
-    mutate(r, () =>
-      fieldops.updateAddress(r.user, id(r), addressBody.parse(r.body)),
+    mutate(
+      r,
+      async () =>
+        await fieldops.updateAddress(r.user, id(r), addressBody.parse(r.body)),
     ),
   );
   app.delete("/api/customer-addresses/:id", async (r) =>
-    mutate(r, () => fieldops.removeAddress(r.user, id(r))),
+    mutate(r, async () => await fieldops.removeAddress(r.user, id(r))),
   );
-  app.get("/api/campaigns/:id/doctors", async (r) =>
-    fieldops.campaignDoctors(r.user, id(r)),
+  app.get(
+    "/api/campaigns/:id/doctors",
+    async (r) => await fieldops.campaignDoctors(r.user, id(r)),
   );
-  app.get("/api/dcr/pending", async (r) => fieldops.pendingReports(r.user));
+  app.get(
+    "/api/dcr/pending",
+    async (r) => await fieldops.pendingReports(r.user),
+  );
   app.get("/api/policies", async (r) => ({
-    policies: service.policies(r.user),
+    policies: await service.policies(r.user),
   }));
   app.put("/api/policies", async (r) => {
     assert(r.user.role === "admin", 403, "Administrator access required");
@@ -729,13 +786,13 @@ export async function buildApp(
       400,
       "Tracking interval must be 15–900 seconds",
     );
-    return mutate(r, () => {
-      store.run(
+    return mutate(r, async () => {
+      await store.run(
         "UPDATE tenants SET policies=? WHERE id=?",
         JSON.stringify(p),
         r.user.tenantId,
       );
-      service.audit(r.user, "policies.updated", r.user.tenantId, p);
+      await service.audit(r.user, "policies.updated", r.user.tenantId, p);
       return { policies: p };
     });
   });
@@ -783,7 +840,7 @@ export async function buildApp(
       path = join(uploadDir, aid);
     writeFileSync(path, buffer, { mode: 0o600 });
     try {
-      store.run(
+      await store.run(
         "INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?)",
         aid,
         r.user.tenantId,
@@ -794,7 +851,7 @@ export async function buildApp(
         buffer.length,
         now(),
       );
-      service.audit(r.user, "attachment.uploaded", aid);
+      await service.audit(r.user, "attachment.uploaded", aid);
     } catch (e) {
       unlinkSync(path);
       throw e;
@@ -802,26 +859,16 @@ export async function buildApp(
     return { id: aid, name: part.filename, mime, size: buffer.length };
   });
   app.get("/api/attachments/:id", async (r, reply) => {
-    const a = store.get(
+    const a = await store.get(
       "SELECT * FROM attachments WHERE id=? AND tenant_id=?",
       id(r),
       r.user.tenantId,
     );
     const referenced =
-      a &&
-      store
-        .all(
-          "SELECT * FROM records WHERE tenant_id=? AND deleted=0",
-          r.user.tenantId,
-        )
-        .some(
-          (row) =>
-            row.kind === "product" &&
-            service.visible(r.user, row) &&
-            JSON.parse(row.data).contentId === a.id,
-        );
+      !!a &&
+      (await service.list(r.user, "product")).some((p) => p.contentId === a.id);
     assert(
-      a && (service.scope(r.user).includes(a.owner_id) || referenced),
+      a && ((await service.scope(r.user)).includes(a.owner_id) || referenced),
       404,
       "Attachment not found",
     );

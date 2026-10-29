@@ -11,19 +11,21 @@ export const reportNames = [
   "inventory",
   "audit",
 ] as const;
-export function report(
+export async function report(
   s: Service,
   u: User,
   type: string,
   q: Record<string, any>,
-) {
-  const visits = s.list(u, "visit", q),
-    plans = s.list(u, "dayplan", q),
-    customers = s.list(u, "customer");
+): Promise<any[]> {
+  const byId = (rows: any[]) => new Map(rows.map((r) => [r.id, r]));
   switch (type) {
-    case "productivity":
-      return s
-        .users(u)
+    case "productivity": {
+      const [visits, plans, users] = await Promise.all([
+        s.list(u, "visit", q),
+        s.list(u, "dayplan", q),
+        s.users(u),
+      ]);
+      return users
         .filter((x) => x.role === "rep")
         .map((x) => {
           const v = visits.filter((v) => v.ownerId === x.id);
@@ -36,55 +38,75 @@ export function report(
             pob: v.reduce((a, v) => a + v.orderTotal, 0),
           };
         });
-    case "deviations":
+    }
+    case "deviations": {
+      const [plans, tours, routes] = await Promise.all([
+        s.list(u, "dayplan", q),
+        s.list(u, "tourplan"),
+        s.list(u, "route"),
+      ]);
+      const route = byId(routes);
       return plans.flatMap((p) => {
-        const tour = s
-          .list(u, "tourplan", { date: p.date, ownerId: p.ownerId })
-          .find((t) => t.status === "approved");
+        const tour = tours.find(
+          (t) =>
+            t.date === p.date &&
+            t.ownerId === p.ownerId &&
+            t.status === "approved",
+        );
         return tour && tour.routeId !== p.routeId
           ? [
               {
                 date: p.date,
                 representative: p.ownerName,
-                plannedRoute: s.record(u, tour.routeId).name,
-                actualRoute: s.record(u, p.routeId).name,
+                plannedRoute: route.get(tour.routeId)?.name ?? "—",
+                actualRoute: route.get(p.routeId)?.name ?? "—",
                 notes: p.notes || "",
               },
             ]
           : [];
       });
-    case "missed-coverage":
+    }
+    case "missed-coverage": {
+      const [visits, customers] = await Promise.all([
+        s.list(u, "visit", q),
+        s.list(u, "customer"),
+      ]);
       return customers
         .filter((c) => c.type === "Doctor")
-        .map((c) => ({
-          doctor: c.name,
-          area: c.area,
-          required: c.frequency || 1,
-          actual: visits.filter((v) => v.customerId === c.id).length,
-          missed: Math.max(
-            0,
-            (c.frequency || 1) -
-              visits.filter((v) => v.customerId === c.id).length,
-          ),
-        }))
+        .map((c) => {
+          const actual = visits.filter((v) => v.customerId === c.id).length;
+          return {
+            doctor: c.name,
+            area: c.area,
+            required: c.frequency || 1,
+            actual,
+            missed: Math.max(0, (c.frequency || 1) - actual),
+          };
+        })
         .filter((c) => c.missed > 0);
-    case "product-reach":
-      return s.list(u, "product").map((p) => ({
-        product: p.name,
-        calls: visits.filter((v) => v.detailedProductIds?.includes(p.id))
-          .length,
-        uniqueCustomers: new Set(
-          visits
-            .filter((v) => v.detailedProductIds?.includes(p.id))
-            .map((v) => v.customerId),
-        ).size,
-        sampleUnits: visits
-          .flatMap((v) => v.samples || [])
-          .filter((x) => x.itemId === p.id)
-          .reduce((a, x) => a + x.quantity, 0),
-      }));
+    }
+    case "product-reach": {
+      const [visits, products] = await Promise.all([
+        s.list(u, "visit", q),
+        s.list(u, "product"),
+      ]);
+      return products.map((p) => {
+        const calls = visits.filter((v) =>
+          v.detailedProductIds?.includes(p.id),
+        );
+        return {
+          product: p.name,
+          calls: calls.length,
+          uniqueCustomers: new Set(calls.map((v) => v.customerId)).size,
+          sampleUnits: visits
+            .flatMap((v) => v.samples || [])
+            .filter((x) => x.itemId === p.id)
+            .reduce((a, x) => a + x.quantity, 0),
+        };
+      });
+    }
     case "expenses":
-      return s.list(u, "expense", q).map((r) => ({
+      return (await s.list(u, "expense", q)).map((r) => ({
         date: r.date,
         representative: r.ownerName,
         category: r.category,
@@ -92,40 +114,55 @@ export function report(
         status: r.status,
         remarks: r.remarks,
       }));
-    case "pob":
+    case "pob": {
+      const [visits, products] = await Promise.all([
+        s.list(u, "visit", q),
+        s.list(u, "product"),
+      ]);
+      const product = byId(products);
       return visits.flatMap((v) =>
         v.orderLines.map((l: any) => ({
           date: v.date,
           representative: v.ownerName,
           customer: v.customerName,
-          product: s.record(u, l.itemId).name,
+          product: product.get(l.itemId)?.name ?? "Removed item",
           quantity: l.quantity,
           unitPrice: l.unitPrice,
           total: l.total,
         })),
       );
-    case "sales":
-      return s.list(u, "sale", q).map((r) => ({
+    }
+    case "sales": {
+      const [sales, customers, products] = await Promise.all([
+        s.list(u, "sale", q),
+        s.list(u, "customer"),
+        s.list(u, "product"),
+      ]);
+      const customer = byId(customers),
+        product = byId(products);
+      return sales.map((r) => ({
         date: r.date,
         representative: r.ownerName,
         type: r.saleType,
-        customer: s.record(u, r.customerId).name,
-        product: s.record(u, r.productId).name,
+        customer: customer.get(r.customerId)?.name ?? "—",
+        product: product.get(r.productId)?.name ?? "—",
         quantity: r.quantity,
         amount: r.amount,
       }));
+    }
     case "inventory":
       return s.inventory(u);
     case "audit":
-      return s.store
-        .all(
+      return (
+        await s.store.all(
           "SELECT a.action,a.entity_id AS entity,a.details,a.created_at AS date,u.name AS actor FROM audit a LEFT JOIN users u ON a.actor_id=u.id WHERE a.tenant_id=? ORDER BY a.created_at DESC LIMIT 2000",
           u.tenantId,
         )
+      )
         .filter((r) => !q.from || r.date.slice(0, 10) >= q.from)
         .filter((r) => !q.to || r.date.slice(0, 10) <= q.to);
     default:
-      return null;
+      return [];
   }
 }
 export function csv(rows: Record<string, any>[]) {

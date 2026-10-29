@@ -45,50 +45,54 @@ const sharedKinds = new Set([
 ]);
 export class Service {
   constructor(public store: Store) {}
-  policies(u: User) {
-    return {
-      ...defaultPolicies,
-      ...JSON.parse(
-        this.store.get("SELECT policies FROM tenants WHERE id=?", u.tenantId)
-          .policies,
-      ),
-    };
+  async policies(u: User) {
+    const tenant = await this.store.get(
+      "SELECT policies FROM tenants WHERE id=?",
+      u.tenantId,
+    );
+    return { ...defaultPolicies, ...JSON.parse(tenant.policies) };
   }
-  scope(u: User): string[] {
+  async scope(u: User): Promise<string[]> {
     if (u.role === "rep") return [u.id];
     if (u.role === "admin")
-      return this.store
-        .all("SELECT id FROM users WHERE tenant_id=?", u.tenantId)
-        .map((x) => x.id);
-    const rows = this.store.all(
-      `WITH RECURSIVE team(id) AS (SELECT ? UNION SELECT users.id FROM users JOIN team ON users.manager_id=team.id WHERE users.tenant_id=?) SELECT id FROM team`,
+      return (
+        await this.store.all(
+          "SELECT id FROM users WHERE tenant_id=?",
+          u.tenantId,
+        )
+      ).map((x) => x.id);
+    const rows = await this.store.all(
+      `WITH RECURSIVE team(id) AS (SELECT CAST(? AS TEXT) UNION SELECT users.id FROM users JOIN team ON users.manager_id=team.id WHERE users.tenant_id=?) SELECT id FROM team`,
       u.id,
       u.tenantId,
     );
     return rows.map((x) => x.id);
   }
-  user(u: User, id: string) {
-    const row = this.store.get(
-      "SELECT * FROM users WHERE tenant_id=? AND id=?",
-      u.tenantId,
-      id,
-    );
-    assert(row && this.scope(u).includes(id), 404, "Employee not found");
+  async user(u: User, id: string) {
+    const [row, scope] = await Promise.all([
+      this.store.get(
+        "SELECT * FROM users WHERE tenant_id=? AND id=?",
+        u.tenantId,
+        id,
+      ),
+      this.scope(u),
+    ]);
+    assert(row && scope.includes(id), 404, "Employee not found");
     return publicUser(row);
   }
-  users(u: User) {
-    let rows = this.store.all(
+  async users(u: User) {
+    let rows = await this.store.all(
       "SELECT * FROM users WHERE tenant_id=? ORDER BY name",
       u.tenantId,
     );
     if (u.role !== "admin") {
-      const ids = this.scope(u);
+      const ids = await this.scope(u);
       rows = rows.filter((x) => ids.includes(x.id) || x.id === u.managerId);
     }
     return rows.map((x) => ({ ...publicUser(x), version: x.version }));
   }
-  audit(u: User, action: string, id: string, details: unknown = {}) {
-    this.store.run(
+  async audit(u: User, action: string, id: string, details: unknown = {}) {
+    await this.store.run(
       "INSERT INTO audit VALUES(?,?,?,?,?,?,?)",
       randomUUID(),
       u.tenantId,
@@ -99,8 +103,8 @@ export class Service {
       now(),
     );
   }
-  raw(u: User, id: string) {
-    const row = this.store.get(
+  async raw(u: User, id: string) {
+    const row = await this.store.get(
       "SELECT * FROM records WHERE tenant_id=? AND id=? AND deleted=0",
       u.tenantId,
       id,
@@ -108,37 +112,48 @@ export class Service {
     assert(row, 404, "Record not found");
     return row;
   }
-  visible(u: User, row: any) {
+  /** Pure permission check against an already loaded scope. */
+  canSee(scope: Set<string>, row: any) {
     if (sharedKinds.has(row.kind)) return true;
     const data = JSON.parse(row.data);
-    return this.scope(u).includes(
-      row.kind === "customer" ? data.assignedTo : row.owner_id,
-    );
+    return scope.has(row.kind === "customer" ? data.assignedTo : row.owner_id);
   }
-  record(u: User, id: string): RecordData {
-    const row = this.raw(u, id);
-    assert(this.visible(u, row), 404, "Record not found");
-    const owner = this.store.get(
-      "SELECT name FROM users WHERE id=?",
-      row.owner_id,
-    );
+  private shape(row: any, ownerName: string, decisions: any[]): RecordData {
     return {
       ...JSON.parse(row.data),
       id: row.id,
       kind: row.kind,
       ownerId: row.owner_id,
-      ownerName: owner.name,
+      ownerName,
       status: row.status,
       version: row.version,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      decisions: this.store.all(
-        "SELECT d.*,u.name AS actorName FROM decisions d JOIN users u ON u.id=d.actor_id WHERE d.record_id=? ORDER BY d.created_at",
-        id,
-      ),
+      decisions,
     };
   }
-  list(u: User, kind: string, query: Record<string, any> = {}): RecordData[] {
+  async record(u: User, id: string): Promise<RecordData> {
+    const [row, decisions, scope] = await Promise.all([
+      this.store.get(
+        "SELECT r.*,x.name AS owner_name FROM records r JOIN users x ON x.id=r.owner_id WHERE r.tenant_id=? AND r.id=? AND r.deleted=0",
+        u.tenantId,
+        id,
+      ),
+      this.store.all(
+        'SELECT d.*,u.name AS "actorName" FROM decisions d JOIN users u ON u.id=d.actor_id WHERE d.tenant_id=? AND d.record_id=? ORDER BY d.created_at',
+        u.tenantId,
+        id,
+      ),
+      this.scope(u),
+    ]);
+    assert(row && this.canSee(new Set(scope), row), 404, "Record not found");
+    return this.shape(row, row.owner_name, decisions);
+  }
+  async list(
+    u: User,
+    kind: string,
+    query: Record<string, any> = {},
+  ): Promise<RecordData[]> {
     assert(
       moduleByKey[kind] || ["visit", "dcr"].includes(kind),
       404,
@@ -146,14 +161,35 @@ export class Service {
     );
     if (moduleByKey[kind]?.adminOnly)
       assert(u.role === "admin", 403, "Administrator access required");
-    let rows = this.store
-      .all(
+    // One round trip: rows, people names, decisions and permissions together.
+    const [rows, names, decisions, scope] = await Promise.all([
+      this.store.all(
         "SELECT * FROM records WHERE tenant_id=? AND kind=? AND deleted=0 ORDER BY created_at DESC",
         u.tenantId,
         kind,
-      )
-      .filter((x) => this.visible(u, x));
-    let out = rows.map((x) => this.record(u, x.id));
+      ),
+      this.store.all("SELECT id,name FROM users WHERE tenant_id=?", u.tenantId),
+      this.store.all(
+        'SELECT d.*,u.name AS "actorName" FROM decisions d JOIN users u ON u.id=d.actor_id WHERE d.record_id IN (SELECT id FROM records WHERE tenant_id=? AND kind=? AND deleted=0) ORDER BY d.created_at',
+        u.tenantId,
+        kind,
+      ),
+      this.scope(u),
+    ]);
+    const allowed = new Set(scope),
+      nameOf = new Map(names.map((x) => [x.id, x.name])),
+      byRecord = new Map<string, any[]>();
+    for (const d of decisions)
+      byRecord.set(d.record_id, [...(byRecord.get(d.record_id) || []), d]);
+    let out = rows
+      .filter((x) => this.canSee(allowed, x))
+      .map((x) =>
+        this.shape(
+          x,
+          nameOf.get(x.owner_id) ?? "Unknown",
+          byRecord.get(x.id) || [],
+        ),
+      );
     if (query.ownerId)
       out = out.filter(
         (x) => x.ownerId === query.ownerId || x.assignedTo === query.ownerId,
@@ -177,7 +213,7 @@ export class Service {
     }
     return out;
   }
-  insert(
+  async insert(
     u: User,
     kind: string,
     data: unknown,
@@ -185,13 +221,13 @@ export class Service {
     status = "active",
   ) {
     assert(
-      this.scope(u).includes(ownerId),
+      (await this.scope(u)).includes(ownerId),
       403,
       "Employee is outside your team",
     );
     const id = randomUUID(),
       at = now();
-    this.store.run(
+    await this.store.run(
       "INSERT INTO records(id,tenant_id,kind,owner_id,status,data,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
       id,
       u.tenantId,
@@ -202,8 +238,8 @@ export class Service {
       at,
       at,
     );
-    this.audit(u, kind + ".created", id);
-    return this.record(u, id);
+    await this.audit(u, kind + ".created", id);
+    return await this.record(u, id);
   }
   assertWritable(u: User, r: RecordData) {
     assert(
@@ -221,9 +257,9 @@ export class Service {
       "RECORD_LOCKED",
     );
   }
-  checkReportLock(u: User, ownerId: string, date: string) {
-    const row = this.store.get(
-      "SELECT id,status FROM records WHERE tenant_id=? AND kind='dcr' AND owner_id=? AND deleted=0 AND json_extract(data,'$.date')=?",
+  async checkReportLock(u: User, ownerId: string, date: string) {
+    const row = await this.store.get(
+      `SELECT id,status FROM records WHERE tenant_id=? AND kind='dcr' AND owner_id=? AND deleted=0 AND ${this.store.json("data", "date")}=?`,
       u.tenantId,
       ownerId,
       date,
@@ -235,7 +271,7 @@ export class Service {
       "REPORT_LOCKED",
     );
   }
-  validate(u: User, kind: string, input: any, ownerId: string) {
+  async validate(u: User, kind: string, input: any, ownerId: string) {
     const mod = moduleByKey[kind];
     assert(mod, 400, "Unsupported module");
     assert(
@@ -284,7 +320,7 @@ export class Service {
         );
         v = [...new Set(v)];
         for (const id of v) {
-          const r = this.record(u, id);
+          const r = await this.record(u, id);
           assert(r.kind === field.ref, 400, `Invalid ${field.label}`);
         }
       } else {
@@ -305,7 +341,7 @@ export class Service {
           );
         if (field.type === "reference") {
           if (field.ref === "users") {
-            const ur = this.store.get(
+            const ur = await this.store.get(
               "SELECT * FROM users WHERE id=? AND tenant_id=? AND active=1",
               v,
               u.tenantId,
@@ -313,17 +349,17 @@ export class Service {
             assert(ur, 400, `Invalid ${field.label}`);
             if (field.key === "assignedTo" || field.key === "recipientId")
               assert(
-                this.scope(u).includes(v),
+                (await this.scope(u)).includes(v),
                 403,
                 "Employee is outside your team",
               );
           } else {
-            const r = this.record(u, v);
+            const r = await this.record(u, v);
             assert(r.kind === field.ref, 400, `Invalid ${field.label}`);
           }
         }
         if (field.type === "file") {
-          const a = this.store.get(
+          const a = await this.store.get(
             "SELECT * FROM attachments WHERE id=? AND tenant_id=?",
             v,
             u.tenantId,
@@ -377,11 +413,11 @@ export class Service {
     }
     if (["expense", "sale", "rcpa"].includes(kind)) {
       assert(out.date <= today(), 400, "Future field activity is not allowed");
-      this.checkReportLock(u, ownerId, out.date);
+      await this.checkReportLock(u, ownerId, out.date);
     }
     if (
       kind === "expense" &&
-      out.amount >= this.policies(u).receiptRequiredAbove
+      out.amount >= (await this.policies(u)).receiptRequiredAbove
     )
       assert(
         out.receiptId,
@@ -390,18 +426,18 @@ export class Service {
       );
     if (kind === "rcpa")
       assert(
-        this.record(u, out.customerId).type === "Chemist",
+        (await this.record(u, out.customerId)).type === "Chemist",
         400,
         "RCPA needs a chemist",
       );
     if (kind === "sponsorship")
       assert(
-        this.record(u, out.customerId).type === "Doctor",
+        (await this.record(u, out.customerId)).type === "Doctor",
         400,
         "Select a doctor",
       );
     if (kind === "challan") {
-      const item = this.record(u, out.itemId);
+      const item = await this.record(u, out.itemId);
       assert(
         item.kind === (out.itemType === "Sample" ? "product" : "input"),
         400,
@@ -410,23 +446,23 @@ export class Service {
     }
     return out;
   }
-  create(u: User, kind: string, input: any, ownerId = u.id) {
+  async create(u: User, kind: string, input: any, ownerId = u.id) {
     const mod = moduleByKey[kind];
     assert(mod, 404, "Unknown module");
     if (mod.adminOnly || mod.readOnlyForRep)
       assert(u.role === "admin", 403, "Administrator access required");
     if (kind === "challan") ownerId = input.recipientId;
-    const data = this.validate(u, kind, input, ownerId);
+    const data = await this.validate(u, kind, input, ownerId);
     if (kind === "dayplan")
       assert(
         data.date <= today() &&
           Date.now() - Date.parse(data.date + "T00:00:00Z") <=
-            (this.policies(u).reportDeadlineDays + 1) * 86400000,
+            ((await this.policies(u)).reportDeadlineDays + 1) * 86400000,
         400,
         "Day plan is outside the reporting window",
       );
-    if (kind === "leave") this.noOverlappingLeave(u, ownerId, data);
-    return this.insert(
+    if (kind === "leave") await this.noOverlappingLeave(u, ownerId, data);
+    return await this.insert(
       u,
       kind,
       data,
@@ -434,8 +470,8 @@ export class Service {
       mod.approvable ? "draft" : "active",
     );
   }
-  noOverlappingLeave(u: User, ownerId: string, data: any, exclude = "") {
-    const overlaps = this.list(u, "leave").some(
+  async noOverlappingLeave(u: User, ownerId: string, data: any, exclude = "") {
+    const overlaps = (await this.list(u, "leave")).some(
       (r) =>
         r.id !== exclude &&
         r.ownerId === ownerId &&
@@ -445,8 +481,8 @@ export class Service {
     );
     assert(!overlaps, 409, "A leave request already covers these dates");
   }
-  update(u: User, id: string, input: any, version: number) {
-    const r = this.record(u, id);
+  async update(u: User, id: string, input: any, version: number) {
+    const r = await this.record(u, id);
     this.assertWritable(u, r);
     assert(
       r.version === version,
@@ -458,29 +494,30 @@ export class Service {
     assert(mod, 400, "Use the workflow action for this record");
     if (mod.adminOnly || mod.readOnlyForRep)
       assert(u.role === "admin", 403, "Administrator access required");
-    const data = this.validate(u, r.kind, input, r.ownerId);
-    if (r.kind === "leave") this.noOverlappingLeave(u, r.ownerId, data, id);
+    const data = await this.validate(u, r.kind, input, r.ownerId);
+    if (r.kind === "leave")
+      await this.noOverlappingLeave(u, r.ownerId, data, id);
     if (r.kind === "dayplan") {
       assert(
         r.date === today() && data.date === r.date,
         409,
         "Past day plans are locked",
       );
-      this.checkReportLock(u, r.ownerId, r.date);
+      await this.checkReportLock(u, r.ownerId, r.date);
     }
     if (["expense", "sale", "rcpa"].includes(r.kind))
-      this.checkReportLock(u, r.ownerId, r.date);
-    this.store.run(
+      await this.checkReportLock(u, r.ownerId, r.date);
+    await this.store.run(
       "UPDATE records SET data=?,version=version+1,updated_at=? WHERE id=?",
       JSON.stringify(data),
       now(),
       id,
     );
-    this.audit(u, r.kind + ".updated", id, { version });
-    return this.record(u, id);
+    await this.audit(u, r.kind + ".updated", id, { version });
+    return await this.record(u, id);
   }
-  remove(u: User, id: string, version: number) {
-    const r = this.record(u, id);
+  async remove(u: User, id: string, version: number) {
+    const r = await this.record(u, id);
     this.assertWritable(u, r);
     assert(
       r.version === version,
@@ -496,8 +533,8 @@ export class Service {
     if (moduleByKey[r.kind]?.readOnlyForRep || moduleByKey[r.kind]?.adminOnly)
       assert(u.role === "admin", 403, "Administrator access required");
     if (["expense", "sale", "rcpa"].includes(r.kind))
-      this.checkReportLock(u, r.ownerId, r.date);
-    const refs = this.store.all(
+      await this.checkReportLock(u, r.ownerId, r.date);
+    const refs = await this.store.all(
       "SELECT data FROM records WHERE tenant_id=? AND id<>? AND deleted=0",
       u.tenantId,
       id,
@@ -516,16 +553,16 @@ export class Service {
       409,
       "This record is referenced by activity. Keep it for history",
     );
-    this.store.run(
+    await this.store.run(
       "UPDATE records SET deleted=1,version=version+1,updated_at=? WHERE id=?",
       now(),
       id,
     );
-    this.audit(u, r.kind + ".deleted", id);
+    await this.audit(u, r.kind + ".deleted", id);
     return { ok: true };
   }
-  submit(u: User, id: string, version: number) {
-    const r = this.record(u, id);
+  async submit(u: User, id: string, version: number) {
+    const r = await this.record(u, id);
     assert(
       r.ownerId === u.id || u.role === "admin",
       403,
@@ -547,10 +584,10 @@ export class Service {
       409,
       "Only draft or returned records can be submitted",
     );
-    if (r.kind === "leave") this.noOverlappingLeave(u, r.ownerId, r, id);
-    if (r.kind === "expense") this.validate(u, "expense", r, r.ownerId);
+    if (r.kind === "leave") await this.noOverlappingLeave(u, r.ownerId, r, id);
+    if (r.kind === "expense") await this.validate(u, "expense", r, r.ownerId);
     if (r.kind === "dcr") {
-      const visits = this.list(u, "visit", {
+      const visits = await this.list(u, "visit", {
         ownerId: r.ownerId,
         date: r.date,
       });
@@ -561,7 +598,7 @@ export class Service {
       );
       const deadline = new Date(r.date + "T00:00:00Z");
       deadline.setUTCDate(
-        deadline.getUTCDate() + this.policies(u).reportDeadlineDays,
+        deadline.getUTCDate() + (await this.policies(u)).reportDeadlineDays,
       );
       assert(
         Date.now() <= deadline.getTime() + 86400000,
@@ -574,30 +611,42 @@ export class Service {
         visitIds: visits.map((x) => x.id),
         visits: visits.length,
         pob: visits.reduce((s, x) => s + x.orderTotal, 0),
-        expenses: this.list(u, "expense", {
-          ownerId: r.ownerId,
-          date: r.date,
-        }).reduce((s, x) => s + x.amount, 0),
+        expenses: (
+          await this.list(u, "expense", {
+            ownerId: r.ownerId,
+            date: r.date,
+          })
+        ).reduce((s, x) => s + x.amount, 0),
       };
-      this.store.run(
+      await this.store.run(
         "UPDATE records SET data=? WHERE id=?",
         JSON.stringify(data),
         id,
       );
     }
-    this.store.run(
+    await this.store.run(
       "UPDATE records SET status='pending',version=version+1,updated_at=? WHERE id=?",
       now(),
       id,
     );
-    this.audit(u, r.kind + ".submitted", id);
-    return this.record(u, id);
+    await this.audit(u, r.kind + ".submitted", id);
+    return await this.record(u, id);
   }
-  decide(u: User, id: string, action: string, reason: string, version: number) {
+  async decide(
+    u: User,
+    id: string,
+    action: string,
+    reason: string,
+    version: number,
+  ) {
     assert(u.role !== "rep", 403, "Manager access required");
-    const r = this.record(u, id);
+    const r = await this.record(u, id);
     assert(r.ownerId !== u.id, 403, "You cannot approve your own submission");
-    assert(this.scope(u).includes(r.ownerId), 404, "Submission not found");
+    assert(
+      (await this.scope(u)).includes(r.ownerId),
+      404,
+      "Submission not found",
+    );
     assert(
       r.version === version,
       409,
@@ -624,13 +673,13 @@ export class Service {
       return: "returned",
       reject: "rejected",
     }[action]!;
-    this.store.run(
+    await this.store.run(
       "UPDATE records SET status=?,version=version+1,updated_at=? WHERE id=?",
       status,
       now(),
       id,
     );
-    this.store.run(
+    await this.store.run(
       "INSERT INTO decisions VALUES(?,?,?,?,?,?,?)",
       randomUUID(),
       u.tenantId,
@@ -640,10 +689,10 @@ export class Service {
       reason.trim(),
       now(),
     );
-    this.audit(u, r.kind + "." + action, id, { reason });
-    return this.record(u, id);
+    await this.audit(u, r.kind + "." + action, id, { reason });
+    return await this.record(u, id);
   }
-  visit(u: User, input: any) {
+  async visit(u: User, input: any) {
     const parsed = z
       .object({
         customerId: z.string(),
@@ -695,13 +744,13 @@ export class Service {
       })
       .strict()
       .parse(input);
-    const customer = this.record(u, parsed.customerId);
+    const customer = await this.record(u, parsed.customerId);
     assert(
       customer.kind === "customer" && customer.assignedTo === u.id,
       403,
       "This customer is not assigned to you",
     );
-    const plan = this.record(u, parsed.planId);
+    const plan = await this.record(u, parsed.planId);
     assert(
       plan.kind === "dayplan" && plan.ownerId === u.id,
       400,
@@ -719,21 +768,21 @@ export class Service {
       400,
       "Visit time is in the future",
     );
-    this.checkReportLock(u, u.id, visitDate);
+    await this.checkReportLock(u, u.id, visitDate);
     assert(
       Date.now() - Date.parse(parsed.visitedAt) <=
-        (this.policies(u).reportDeadlineDays + 1) * 86400000,
+        ((await this.policies(u)).reportDeadlineDays + 1) * 86400000,
       400,
       "Visit is outside the reporting window",
     );
     for (const id of parsed.detailedProductIds)
       assert(
-        this.record(u, id).kind === "product",
+        (await this.record(u, id)).kind === "product",
         400,
         "Invalid detailing product",
       );
     if (parsed.campaignId) {
-      const c = this.record(u, parsed.campaignId);
+      const c = await this.record(u, parsed.campaignId);
       assert(
         c.kind === "campaign" &&
           c.fromDate <= visitDate &&
@@ -742,7 +791,7 @@ export class Service {
         "Campaign is not active for this visit",
       );
     }
-    const p = this.policies(u),
+    const p = await this.policies(u),
       loc = parsed.location;
     let distance: number | null = null;
     if (loc && customer.latitude !== undefined)
@@ -769,14 +818,15 @@ export class Service {
         "Explain the location exception before saving",
       );
     let orderTotal = 0;
-    const orderLines = parsed.orderLines.map((line) => {
-      const product = this.record(u, line.itemId);
+    const orderLines = [];
+    for (const line of parsed.orderLines) {
+      const product = await this.record(u, line.itemId);
       assert(product.kind === "product", 400, "Invalid order product");
       const total = (Math.round(product.price * 100) * line.quantity) / 100;
       orderTotal += total;
-      return { ...line, unitPrice: product.price, total };
-    });
-    const r = this.insert(
+      orderLines.push({ ...line, unitPrice: product.price, total });
+    }
+    const r = await this.insert(
       u,
       "visit",
       {
@@ -798,13 +848,13 @@ export class Service {
       ["Input", parsed.inputs],
     ] as const) {
       for (const line of lines) {
-        const item = this.record(u, line.itemId);
+        const item = await this.record(u, line.itemId);
         assert(
           item.kind === (type === "Sample" ? "product" : "input"),
           400,
           "Invalid stock item",
         );
-        const balance = this.store.get(
+        const balance = await this.store.get(
           "SELECT quantity FROM inventory WHERE tenant_id=? AND user_id=? AND item_type=? AND item_id=?",
           u.tenantId,
           u.id,
@@ -816,12 +866,12 @@ export class Service {
           409,
           "Insufficient " + type.toLowerCase() + " stock",
         );
-        this.stock(u, u.id, type, line.itemId, -line.quantity, r.id);
+        await this.stock(u, u.id, type, line.itemId, -line.quantity, r.id);
       }
     }
     return r;
   }
-  stock(
+  async stock(
     u: User,
     userId: string,
     type: string,
@@ -830,7 +880,7 @@ export class Service {
     sourceId: string,
   ) {
     if (delta < 0)
-      this.store.run(
+      await this.store.run(
         "UPDATE inventory SET quantity=quantity+? WHERE tenant_id=? AND user_id=? AND item_type=? AND item_id=?",
         delta,
         u.tenantId,
@@ -839,15 +889,15 @@ export class Service {
         itemId,
       );
     else
-      this.store.run(
-        "INSERT INTO inventory VALUES(?,?,?,?,?) ON CONFLICT(tenant_id,user_id,item_type,item_id) DO UPDATE SET quantity=quantity+excluded.quantity",
+      await this.store.run(
+        "INSERT INTO inventory VALUES(?,?,?,?,?) ON CONFLICT(tenant_id,user_id,item_type,item_id) DO UPDATE SET quantity=inventory.quantity+excluded.quantity",
         u.tenantId,
         userId,
         type,
         itemId,
         delta,
       );
-    this.store.run(
+    await this.store.run(
       "INSERT INTO stock_ledger VALUES(?,?,?,?,?,?,?,?)",
       randomUUID(),
       u.tenantId,
@@ -859,14 +909,14 @@ export class Service {
       now(),
     );
   }
-  acknowledge(
+  async acknowledge(
     u: User,
     id: string,
     version: number,
     receivedQty: number,
     notes: string,
   ) {
-    const r = this.record(u, id);
+    const r = await this.record(u, id);
     assert(
       r.kind === "challan" && r.ownerId === u.id,
       403,
@@ -887,57 +937,65 @@ export class Service {
     if (receivedQty !== r.quantity)
       assert(notes.trim().length >= 5, 400, "Explain the quantity discrepancy");
     const data = {
-      ...JSON.parse(this.raw(u, id).data),
+      ...JSON.parse((await this.raw(u, id)).data),
       receivedQty,
       acknowledgedAt: now(),
       acknowledgementNotes: notes,
     };
-    this.store.run(
+    await this.store.run(
       "UPDATE records SET data=?,status='acknowledged',version=version+1,updated_at=? WHERE id=?",
       JSON.stringify(data),
       now(),
       id,
     );
-    this.stock(u, u.id, r.itemType, r.itemId, receivedQty, id);
-    this.audit(u, "challan.acknowledged", id, { receivedQty });
-    return this.record(u, id);
+    await this.stock(u, u.id, r.itemType, r.itemId, receivedQty, id);
+    await this.audit(u, "challan.acknowledged", id, { receivedQty });
+    return await this.record(u, id);
   }
-  dcr(u: User, date: string, remarks: string) {
+  async dcr(u: User, date: string, remarks: string) {
     day(date);
     assert(date <= today(), 400, "Future reports are not allowed");
-    const existing = this.store.get(
-      "SELECT id FROM records WHERE tenant_id=? AND kind='dcr' AND owner_id=? AND json_extract(data,'$.date')=? AND deleted=0",
+    const existing = await this.store.get(
+      `SELECT id FROM records WHERE tenant_id=? AND kind='dcr' AND owner_id=? AND ${this.store.json("data", "date")}=? AND deleted=0`,
       u.tenantId,
       u.id,
       date,
     );
     if (existing) {
-      const r = this.record(u, existing.id);
+      const r = await this.record(u, existing.id);
       this.assertWritable(u, r);
-      this.store.run(
+      await this.store.run(
         "UPDATE records SET data=?,version=version+1,updated_at=? WHERE id=?",
         JSON.stringify({ date, remarks }),
         now(),
         r.id,
       );
-      return this.record(u, r.id);
+      return await this.record(u, r.id);
     }
-    return this.insert(u, "dcr", { date, remarks }, u.id, "draft");
+    return await this.insert(u, "dcr", { date, remarks }, u.id, "draft");
   }
-  approvals(u: User) {
+  async approvals(u: User) {
     assert(u.role !== "rep", 403, "Manager access required");
-    return [...modules.filter((m) => m.approvable).map((m) => m.key), "dcr"]
-      .flatMap((k) => this.list(u, k))
+    const lists = await Promise.all(
+      [...modules.filter((m) => m.approvable).map((m) => m.key), "dcr"].map(
+        (k) => this.list(u, k),
+      ),
+    );
+    return lists
+      .flat()
       .filter((r) => r.status === "pending" && r.ownerId !== u.id)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
-  inventory(u: User) {
-    return this.store
-      .all(
-        "SELECT i.*,r.data,u.name AS ownerName FROM inventory i JOIN records r ON r.id=i.item_id JOIN users u ON u.id=i.user_id WHERE i.tenant_id=?",
+  async inventory(u: User) {
+    const [rows, scope] = await Promise.all([
+      this.store.all(
+        'SELECT i.*,r.data,u.name AS "ownerName" FROM inventory i JOIN records r ON r.id=i.item_id JOIN users u ON u.id=i.user_id WHERE i.tenant_id=?',
         u.tenantId,
-      )
-      .filter((r) => this.scope(u).includes(r.user_id))
+      ),
+      this.scope(u),
+    ]);
+    return rows
+      .filter((r) => scope.includes(r.user_id))
       .map((r) => ({
         userId: r.user_id,
         ownerName: r.ownerName,
@@ -947,23 +1005,30 @@ export class Service {
         quantity: r.quantity,
       }));
   }
-  dashboard(u: User, query: Record<string, any> = {}) {
+  async dashboard(u: User, query: Record<string, any> = {}) {
     const date = query.date || today();
     day(date);
     const from = query.from || date.slice(0, 7) + "-01";
     const to = query.to || date;
-    const visits = this.list(u, "visit", { from, to, ownerId: query.ownerId });
+    const visits = await this.list(u, "visit", {
+      from,
+      to,
+      ownerId: query.ownerId,
+    });
     const dayVisits = visits.filter((x) => x.date === date);
-    const users = this.users(u).filter(
+    const users = (await this.users(u)).filter(
       (x) =>
         x.active &&
         x.role === "rep" &&
         (!query.ownerId || x.id === query.ownerId),
     );
-    const plans = this.list(u, "dayplan", { date, ownerId: query.ownerId });
-    const dcr = this.list(u, "dcr", { date, ownerId: query.ownerId });
-    const customer = this.list(u, "customer", { ownerId: query.ownerId });
-    const monthVisits = this.list(u, "visit", {
+    const plans = await this.list(u, "dayplan", {
+      date,
+      ownerId: query.ownerId,
+    });
+    const dcr = await this.list(u, "dcr", { date, ownerId: query.ownerId });
+    const customer = await this.list(u, "customer", { ownerId: query.ownerId });
+    const monthVisits = await this.list(u, "visit", {
       from: date.slice(0, 7) + "-01",
       to: date,
       ownerId: query.ownerId,
@@ -981,11 +1046,13 @@ export class Service {
         ["pending", "approved"].includes(x.status),
       ).length,
       pob: visits.reduce((s, x) => s + x.orderTotal, 0),
-      expenses: this.list(u, "expense", {
-        from,
-        to,
-        ownerId: query.ownerId,
-      }).reduce((s, x) => s + x.amount, 0),
+      expenses: (
+        await this.list(u, "expense", {
+          from,
+          to,
+          ownerId: query.ownerId,
+        })
+      ).reduce((s, x) => s + x.amount, 0),
       verified: dayVisits.filter((x) => x.verified).length,
       monthlyCoverage: new Set(
         monthVisits
@@ -1007,16 +1074,16 @@ export class Service {
       attention:
         u.role === "rep"
           ? [
-              ...this.list(u, "expense"),
-              ...this.list(u, "dcr"),
-              ...this.list(u, "leave"),
+              ...(await this.list(u, "expense")),
+              ...(await this.list(u, "dcr")),
+              ...(await this.list(u, "leave")),
             ].filter((x) => x.status === "returned")
-          : this.approvals(u),
+          : await this.approvals(u),
       plans,
       visits: dayVisits,
     };
   }
-  idempotent(
+  async idempotent(
     u: User,
     key: string | undefined,
     payload: unknown,
@@ -1026,9 +1093,9 @@ export class Service {
     const hash = createHash("sha256")
       .update(JSON.stringify(payload))
       .digest("hex");
-    return this.store.transaction(() => {
+    return await this.store.transaction(async () => {
       if (key) {
-        const prev = this.store.get(
+        const prev = await this.store.get(
           "SELECT * FROM operations WHERE tenant_id=? AND user_id=? AND operation_id=?",
           u.tenantId,
           u.id,
@@ -1044,9 +1111,9 @@ export class Service {
           return JSON.parse(prev.response);
         }
       }
-      const result = fn();
+      const result = await fn();
       if (key)
-        this.store.run(
+        await this.store.run(
           "INSERT INTO operations VALUES(?,?,?,?,?)",
           u.tenantId,
           u.id,

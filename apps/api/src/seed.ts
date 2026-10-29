@@ -6,12 +6,12 @@ import { hashPassword, publicUser } from "./auth.ts";
 import { defaultPolicies } from "../../../packages/shared/src/index.ts";
 export const demoPassword = "Demo-only-2026!";
 export async function seedDemo(store: Store) {
-  if (store.get("SELECT id FROM tenants LIMIT 1"))
+  if (await store.get("SELECT id FROM tenants LIMIT 1"))
     throw new Error(
       "Demo seeding requires an empty database. Existing data was preserved.",
     );
   const hash = await hashPassword(demoPassword);
-  store.run(
+  await store.run(
     "INSERT INTO tenants VALUES(?,?,?,?)",
     "tenant-demo",
     "VIDYA",
@@ -24,7 +24,7 @@ export async function seedDemo(store: Store) {
     ["aman", "Aman Sharma", "aman@mrconnect.test", "rep", "manager"],
     ["priya", "Priya Singh", "priya@mrconnect.test", "rep", "manager"],
   ])
-    store.run(
+    await store.run(
       "INSERT INTO users(id,tenant_id,email,name,role,manager_id,password_hash) VALUES(?,?,?,?,?,?,?)",
       id,
       "tenant-demo",
@@ -35,18 +35,24 @@ export async function seedDemo(store: Store) {
       hash,
     );
   const s = new Service(store),
-    admin = publicUser(store.get("SELECT * FROM users WHERE id=?", "admin")),
-    aman = publicUser(store.get("SELECT * FROM users WHERE id=?", "aman")),
-    priya = publicUser(store.get("SELECT * FROM users WHERE id=?", "priya"));
-  store.transaction(() => {
-    const territory = s.create(admin, "territory", {
+    admin = publicUser(
+      await store.get("SELECT * FROM users WHERE id=?", "admin"),
+    ),
+    aman = publicUser(
+      await store.get("SELECT * FROM users WHERE id=?", "aman"),
+    ),
+    priya = publicUser(
+      await store.get("SELECT * FROM users WHERE id=?", "priya"),
+    );
+  await store.transaction(async () => {
+    const territory = await s.create(admin, "territory", {
       name: "Delhi HQ",
       zone: "North zone",
       state: "Delhi",
       division: "Pharma division",
     });
-    store.run("UPDATE users SET territory_id=?", territory.id);
-    const route = s.create(admin, "route", {
+    await store.run("UPDATE users SET territory_id=?", territory.id);
+    const route = await s.create(admin, "route", {
       name: "Delhi HQ · Local route",
       origin: "Delhi HQ",
       viaLocations: "Dayalpur\nGeeta Colony\nKrishna Nagar",
@@ -55,7 +61,7 @@ export async function seedDemo(store: Store) {
       frequency: 8,
       additionalAllowance: 0,
     });
-    const route2 = s.create(admin, "route", {
+    const route2 = await s.create(admin, "route", {
       name: "Noida · Ex-station",
       origin: "Delhi HQ",
       viaLocations: "Mayur Vihar\nSector 18",
@@ -65,7 +71,7 @@ export async function seedDemo(store: Store) {
       additionalAllowance: 100,
     });
     const products = [
-      s.create(admin, "product", {
+      await s.create(admin, "product", {
         name: "VitaD Plus",
         code: "VD-001",
         price: 180,
@@ -73,14 +79,14 @@ export async function seedDemo(store: Store) {
         description:
           "Demonstration product. Replace this text with company-approved product material before use.",
       }),
-      s.create(admin, "product", {
+      await s.create(admin, "product", {
         name: "CardioCare",
         code: "CC-002",
         price: 240,
         category: "Cardiology",
         description: "Demonstration product; no medical claims.",
       }),
-      s.create(admin, "product", {
+      await s.create(admin, "product", {
         name: "GastroEase",
         code: "GE-003",
         price: 130,
@@ -88,12 +94,12 @@ export async function seedDemo(store: Store) {
         description: "Demonstration product; no medical claims.",
       }),
     ];
-    const input = s.create(admin, "input", {
+    const input = await s.create(admin, "input", {
       name: "Patient education leaflet",
       code: "IN-01",
       unitCost: 5,
     });
-    const customers = [
+    const customerRows = [
       ["Dr. Alka Jain", "Doctor", "Gynaecologist", "Dayalpur", "A+"],
       [
         "Dr. Surendra Kumar",
@@ -113,25 +119,28 @@ export async function seedDemo(store: Store) {
         "B",
       ],
       ["Sunrise Hospital", "Hospital", "Multispecialty", "Delhi", "A"],
-    ].map((c, i) =>
-      s.create(admin, "customer", {
-        name: c[0],
-        type: c[1],
-        specialty: c[2],
-        area: c[3],
-        class: c[4],
-        assignedTo: "aman",
-        routeId: route.id,
-        frequency: 2,
-        mobile: "987650000" + i,
-        clinicAddress: "Demo address · " + c[3] + ", Delhi",
-        state: "Delhi",
-        pinCode: "110001",
-        latitude: 28.65 + i * 0.004,
-        longitude: 77.24 + i * 0.003,
-      }),
-    );
-    s.create(admin, "customer", {
+    ];
+    const customers = [];
+    for (const [i, c] of customerRows.entries())
+      customers.push(
+        await s.create(admin, "customer", {
+          name: c[0],
+          type: c[1],
+          specialty: c[2],
+          area: c[3],
+          class: c[4],
+          assignedTo: "aman",
+          routeId: route.id,
+          frequency: 2,
+          mobile: "987650000" + i,
+          clinicAddress: "Demo address · " + c[3] + ", Delhi",
+          state: "Delhi",
+          pinCode: "110001",
+          latitude: 28.65 + i * 0.004,
+          longitude: 77.24 + i * 0.003,
+        }),
+      );
+    await s.create(admin, "customer", {
       name: "Dr. Meera Verma",
       type: "Doctor",
       assignedTo: "priya",
@@ -145,7 +154,7 @@ export async function seedDemo(store: Store) {
     const date = today(),
       from = date.slice(0, 7) + "-01",
       end = date.slice(0, 7) + "-28";
-    s.create(admin, "campaign", {
+    await s.create(admin, "campaign", {
       name: "October product awareness",
       fromDate: from,
       toDate: end,
@@ -154,14 +163,14 @@ export async function seedDemo(store: Store) {
       description:
         "Plan focused detailing and track follow-up visits. Demo campaign.",
     });
-    const plan = s.create(aman, "dayplan", {
+    const plan = await s.create(aman, "dayplan", {
       date,
       routeId: route.id,
       workType: "Field work",
       jointWith: "manager",
       notes: "Cover Dayalpur and Geeta Colony.",
     });
-    s.create(priya, "dayplan", {
+    await s.create(priya, "dayplan", {
       date,
       routeId: route2.id,
       workType: "Field work",
@@ -169,11 +178,11 @@ export async function seedDemo(store: Store) {
     });
     for (const u of [aman, priya])
       for (const product of products)
-        s.stock(admin, u.id, "Sample", product.id, 60, "demo-opening");
-    s.stock(admin, "aman", "Input", input.id, 100, "demo-opening");
+        await s.stock(admin, u.id, "Sample", product.id, 60, "demo-opening");
+    await s.stock(admin, "aman", "Input", input.id, 100, "demo-opening");
     const hourAgo = new Date(Date.now() - 3600000).toISOString();
     for (let i = 0; i < 2; i++)
-      s.insert(
+      await s.insert(
         aman,
         "visit",
         {
@@ -205,32 +214,32 @@ export async function seedDemo(store: Store) {
         "aman",
         "completed",
       );
-    const exp = s.create(priya, "expense", {
+    const exp = await s.create(priya, "expense", {
       date,
       category: "TA",
       amount: 250,
       distanceKm: 28,
       remarks: "Metro and local travel (demo).",
     });
-    s.submit(priya, exp.id, exp.version);
+    await s.submit(priya, exp.id, exp.version);
     const leaveDate = new Date(Date.now() + 3 * 86400000)
       .toISOString()
       .slice(0, 10);
-    const leave = s.create(aman, "leave", {
+    const leave = await s.create(aman, "leave", {
       fromDate: leaveDate,
       toDate: leaveDate,
       leaveType: "Casual",
       reason: "Personal work (demo)",
     });
-    s.submit(aman, leave.id, leave.version);
-    const tour = s.create(aman, "tourplan", {
+    await s.submit(aman, leave.id, leave.version);
+    const tour = await s.create(aman, "tourplan", {
       date: leaveDate,
       routeId: route2.id,
       workType: "Field work",
       notes: "Proposed Noida coverage",
     });
-    s.submit(aman, tour.id, tour.version);
-    s.create(admin, "challan", {
+    await s.submit(aman, tour.id, tour.version);
+    await s.create(admin, "challan", {
       name: "CH-DEMO-0102",
       date,
       recipientId: "aman",
@@ -239,13 +248,13 @@ export async function seedDemo(store: Store) {
       quantity: 25,
       notes: "Check received quantity before acknowledging.",
     });
-    s.create(aman, "reminder", {
+    await s.create(aman, "reminder", {
       date: leaveDate,
       customerId: customers[0].id,
       notes: "Follow up on stock availability",
       completed: "No",
     });
-    s.create(aman, "sale", {
+    await s.create(aman, "sale", {
       date,
       saleType: "Doctor-wise",
       customerId: customers[0].id,
@@ -253,7 +262,7 @@ export async function seedDemo(store: Store) {
       quantity: 15,
       amount: 2700,
     });
-    s.create(admin, "announcement", {
+    await s.create(admin, "announcement", {
       title: "Welcome to the field workspace",
       body: "This is a demonstration workspace with fictional records. Start your day plan, record calls and review your report before submitting.",
     });
@@ -275,11 +284,13 @@ if (
 ) {
   if (process.argv[2] !== "--demo" || process.env.NODE_ENV === "production")
     throw new Error("Use --demo in development only.");
-  const store = new Store(
-    process.env.DATABASE_PATH || ".data/mr-connect.sqlite",
+  const store = await Store.open(
+    process.env.DATABASE_URL ||
+      process.env.DATABASE_PATH ||
+      ".data/mr-connect.sqlite",
   );
   const result = await seedDemo(store);
-  store.close();
+  await store.close();
   console.log(
     "Demo workspace created. See README.md for local demonstration accounts.",
     { companyCode: result.companyCode, users: result.users },

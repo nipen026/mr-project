@@ -434,7 +434,9 @@ fun FieldApp(vm: FieldViewModel) {
                     vm.screen == "welcome" -> Welcome { vm.navigate("login") }
                     vm.screen == "login" -> LoginScreen(vm)
                     vm.screen == "access-help" -> AccessHelp(vm)
-                    vm.boot == null -> Message("Sign in to load your company workspace.")
+                    vm.boot == null ->
+                        if (vm.busy) SkeletonCards(4)
+                        else Message("Sign in to load your company workspace.")
                     vm.screen == "home" -> Home(vm, shiftAction)
                     vm.screen == "calls" -> Calls(vm)
                     vm.screen == "plan" -> Plan(vm)

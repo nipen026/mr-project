@@ -41,8 +41,13 @@ const result = async (
 };
 let route: any, customer: any, product: any, plan: any;
 before(async () => {
+  // Set TEST_DATABASE_URL (a direct PostgreSQL URL) to run against PostgreSQL
+  // in a throwaway schema instead of a temporary SQLite file.
+  if (process.env.TEST_DATABASE_URL)
+    process.env.DATABASE_SCHEMA =
+      "mrtest_" + randomUUID().replaceAll("-", "").slice(0, 12);
   ctx = await buildApp({
-    databasePath: join(temp, "db.sqlite"),
+    databasePath: process.env.TEST_DATABASE_URL || join(temp, "db.sqlite"),
     uploads: join(temp, "uploads"),
     serveWeb: false,
   });
@@ -70,6 +75,7 @@ before(async () => {
   plan = (await result("GET", "/records/dayplan", undefined, "aman")).items[0];
 });
 after(async () => {
+  await ctx.store.destroy();
   await ctx.app.close();
   rmSync(temp, { recursive: true, force: true });
 });
@@ -199,14 +205,14 @@ test("representatives see only assigned customers; managers see their hierarchy"
 });
 test("tenant identifiers never bypass isolation", async () => {
   const hash = await hashPassword(demoPassword);
-  ctx.store.run(
+  await ctx.store.run(
     "INSERT INTO tenants VALUES(?,?,?,?)",
     "other-tenant",
     "OTHER",
     "Other",
     JSON.stringify(defaultPolicies),
   );
-  ctx.store.run(
+  await ctx.store.run(
     "INSERT INTO users(id,tenant_id,email,name,role,password_hash) VALUES(?,?,?,?,?,?)",
     "other-user",
     "other-tenant",

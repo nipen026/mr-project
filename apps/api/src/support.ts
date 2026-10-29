@@ -17,7 +17,7 @@ export class Support {
   constructor(private s: Service) {}
   // M04: public access request. The reply never reveals whether the company
   // or user exists, so it cannot be used to enumerate accounts.
-  accessRequest(input: {
+  async accessRequest(input: {
     companyCode: string;
     email: string;
     reason?: string;
@@ -32,17 +32,17 @@ export class Support {
         "If the company code and user ID match an active account, your administrator has been notified. They will verify your identity and reset your access.",
       reference: code(randomUUID()),
     };
-    const tenant = this.s.store.get(
+    const tenant = await this.s.store.get(
       "SELECT id FROM tenants WHERE upper(code)=?",
       input.companyCode.trim().toUpperCase(),
     );
     if (!tenant) return reply;
-    const user = this.s.store.get(
+    const user = await this.s.store.get(
       "SELECT id FROM users WHERE tenant_id=? AND lower(email)=?",
       tenant.id,
       contact,
     );
-    const open = this.s.store.get(
+    const open = await this.s.store.get(
       "SELECT id FROM support_requests WHERE tenant_id=? AND kind='access_reset' AND contact=? AND status!='resolved'",
       tenant.id,
       contact,
@@ -50,7 +50,7 @@ export class Support {
     if (open) return { ...reply, reference: code(open.id) };
     const id = randomUUID(),
       at = now();
-    this.s.store.run(
+    await this.s.store.run(
       "INSERT INTO support_requests(id,tenant_id,user_id,kind,category,subject,message,contact,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
       id,
       tenant.id,
@@ -63,7 +63,7 @@ export class Support {
       at,
       at,
     );
-    this.s.store.run(
+    await this.s.store.run(
       "INSERT INTO audit VALUES(?,?,?,?,?,?,?)",
       randomUUID(),
       tenant.id,
@@ -76,14 +76,14 @@ export class Support {
     return { ...reply, reference: code(id) };
   }
   // M64: help content and the caller's own tickets.
-  help(u: User) {
-    const policies = this.s.policies(u);
-    const admin = this.s.store.get(
+  async help(u: User) {
+    const policies = await this.s.policies(u);
+    const admin = await this.s.store.get(
       "SELECT name,email FROM users WHERE tenant_id=? AND role='admin' AND active=1 ORDER BY name LIMIT 1",
       u.tenantId,
     );
     return {
-      company: this.s.store.get(
+      company: await this.s.store.get(
         "SELECT code,name FROM tenants WHERE id=?",
         u.tenantId,
       ),
@@ -110,10 +110,10 @@ export class Support {
           body: "Use Forgot password on the sign-in screen, or raise an access request below. Your administrator verifies your identity before changing access.",
         },
       ],
-      tickets: this.tickets(u, {}).slice(0, 20),
+      tickets: (await this.tickets(u, {})).slice(0, 20),
     };
   }
-  createTicket(
+  async createTicket(
     u: User,
     input: {
       category: string;
@@ -136,7 +136,7 @@ export class Support {
     );
     const id = randomUUID(),
       at = now();
-    this.s.store.run(
+    await this.s.store.run(
       "INSERT INTO support_requests(id,tenant_id,user_id,kind,category,subject,message,reference,contact,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
       id,
       u.tenantId,
@@ -150,8 +150,8 @@ export class Support {
       at,
       at,
     );
-    this.s.audit(u, "support.created", id, { category: input.category });
-    return this.ticket(u, id);
+    await this.s.audit(u, "support.created", id, { category: input.category });
+    return await this.ticket(u, id);
   }
   private map(row: any) {
     return {
@@ -171,8 +171,8 @@ export class Support {
       updatedAt: row.updated_at,
     };
   }
-  private ticket(u: User, id: string) {
-    const row = this.s.store.get(
+  private async ticket(u: User, id: string) {
+    const row = await this.s.store.get(
       "SELECT r.*,x.name AS requester_name,y.name AS resolver_name FROM support_requests r LEFT JOIN users x ON x.id=r.user_id LEFT JOIN users y ON y.id=r.resolved_by WHERE r.tenant_id=? AND r.id=?",
       u.tenantId,
       id,
@@ -184,28 +184,28 @@ export class Support {
     );
     return this.map(row);
   }
-  tickets(u: User, q: Record<string, any>) {
+  async tickets(u: User, q: Record<string, any>) {
     assert(
       !q.status || (ticketStatuses as readonly string[]).includes(q.status),
       400,
       "Unknown status",
     );
-    return this.s.store
-      .all(
-        "SELECT r.*,x.name AS requester_name,y.name AS resolver_name FROM support_requests r LEFT JOIN users x ON x.id=r.user_id LEFT JOIN users y ON y.id=r.resolved_by WHERE r.tenant_id=? ORDER BY r.created_at DESC LIMIT 500",
-        u.tenantId,
-      )
+    const rows = await this.s.store.all(
+      "SELECT r.*,x.name AS requester_name,y.name AS resolver_name FROM support_requests r LEFT JOIN users x ON x.id=r.user_id LEFT JOIN users y ON y.id=r.resolved_by WHERE r.tenant_id=? ORDER BY r.created_at DESC LIMIT 500",
+      u.tenantId,
+    );
+    return rows
       .filter((r) => u.role === "admin" || r.user_id === u.id)
       .filter((r) => !q.status || r.status === q.status)
       .map((r) => this.map(r));
   }
-  updateTicket(
+  async updateTicket(
     u: User,
     id: string,
     input: { status: string; response: string },
   ) {
     assert(u.role === "admin", 403, "Administrator access required");
-    const current = this.ticket(u, id);
+    const current = await this.ticket(u, id);
     const response = input.response.trim();
     assert(response.length <= 2000, 400, "Response is too long");
     assert(
@@ -213,7 +213,7 @@ export class Support {
       400,
       "Write a response of at least five characters before resolving",
     );
-    this.s.store.run(
+    await this.s.store.run(
       "UPDATE support_requests SET status=?,response=?,resolved_by=?,updated_at=? WHERE id=?",
       input.status,
       response,
@@ -221,8 +221,8 @@ export class Support {
       now(),
       current.id,
     );
-    this.s.audit(u, "support." + input.status, id, { response });
-    return this.ticket(u, id);
+    await this.s.audit(u, "support." + input.status, id, { response });
+    return await this.ticket(u, id);
   }
   // M70: what the signed-in role may open or change.
   access(u: User) {
@@ -245,22 +245,67 @@ export class Support {
       }),
     };
   }
+  // Settings → Roles & permissions, derived from the same rules the API enforces.
+  async roles(u: User) {
+    const counts = await this.s.store.all(
+      "SELECT role,COUNT(*) AS n FROM users WHERE tenant_id=? AND active=1 GROUP BY role",
+      u.tenantId,
+    );
+    const people = new Map(counts.map((c) => [c.role, c.n]));
+    const rows = [
+      {
+        role: "admin",
+        label: "Administrator",
+        scope: "Entire company",
+        approvals: "Team submissions except own",
+        settings: "Manage",
+      },
+      {
+        role: "manager",
+        label: "Manager",
+        scope: "Own reporting hierarchy",
+        approvals: "Team submissions except own",
+        settings: "Read policies",
+      },
+      {
+        role: "rep",
+        label: "Representative",
+        scope: "Own data and assigned customers",
+        approvals: "Submit, correct and resubmit own",
+        settings: "Own account",
+      },
+    ];
+    return {
+      items: rows.map((r) => {
+        const read = modules.filter((m) => !m.adminOnly || r.role === "admin");
+        const write = modules.filter(
+          (m) => (!m.adminOnly && !m.readOnlyForRep) || r.role === "admin",
+        );
+        return {
+          ...r,
+          people: people.get(r.role) || 0,
+          modulesRead: read.length,
+          modulesWrite: write.length,
+        };
+      }),
+    };
+  }
   // M63: language preference.
-  preferences(u: User) {
-    const row = this.s.store.get(
+  async preferences(u: User) {
+    const row = await this.s.store.get(
       "SELECT language FROM preferences WHERE user_id=?",
       u.id,
     );
     return { language: row?.language || "en", languages };
   }
-  setPreferences(u: User, input: { language: string }) {
-    this.s.store.run(
+  async setPreferences(u: User, input: { language: string }) {
+    await this.s.store.run(
       "INSERT INTO preferences(user_id,language,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET language=excluded.language,updated_at=excluded.updated_at",
       u.id,
       input.language,
       now(),
     );
-    return this.preferences(u);
+    return await this.preferences(u);
   }
 }
 export const ticketBody = z
