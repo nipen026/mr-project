@@ -39,6 +39,7 @@ import {
 import { TrackingPage } from "./TrackingPage";
 import { Account, Settings } from "./Settings";
 import type { User } from "../../../packages/shared/src/index.ts";
+import { TextField } from "./controls";
 function App() {
   const [user, setUser] = useState<User | null>();
   useEffect(() => {
@@ -136,40 +137,34 @@ function Login({ onSuccess }: { onSuccess: (u: User) => void }) {
               }
             }}
           >
-            <div className="field">
-              <label htmlFor="company-code">Company code *</label>
-              <input
-                id="company-code"
-                required
-                autoComplete="organization"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder="Your company code"
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="user-email">Employee ID / email *</label>
-              <input
-                id="user-email"
-                required
-                autoComplete="username"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@company.com"
-              />
-            </div>
+            <TextField
+              label="Company code"
+              id="company-code"
+              required
+              autoComplete="organization"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="Your company code"
+            />
+            <TextField
+              label="Employee ID / email"
+              id="user-email"
+              required
+              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@company.com"
+            />
             {!help && (
-              <div className="field">
-                <label htmlFor="user-password">Password *</label>
-                <input
-                  id="user-password"
-                  type="password"
-                  required
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
+              <TextField
+                label="Password"
+                id="user-password"
+                type="password"
+                required
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
             )}
             {error && <Notice tone={help ? "info" : "error"}>{error}</Notice>}
             <Button disabled={busy} className="full-width">

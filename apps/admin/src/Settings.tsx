@@ -12,6 +12,7 @@ import {
 } from "./ui";
 import { SupportRequests } from "./insights";
 import { Permissions } from "./Permissions";
+import { TextField } from "./controls";
 const policyLabels: Record<string, string> = {
   gpsRadiusMeters: "Visit verification radius (m)",
   maxAccuracyMeters: "Maximum GPS uncertainty (m)",
@@ -104,24 +105,21 @@ export function Settings() {
           >
             <div className="form-grid">
               {Object.entries(values).map(([key, value]) => (
-                <div className="field" key={key}>
-                  <label htmlFor={"policy-" + key}>
-                    {policyLabels[key] || key}
-                  </label>
-                  <input
-                    id={"policy-" + key}
-                    type="number"
-                    required
-                    min={key === "taPerKm" ? 0 : 1}
-                    max={key === "trackingIntervalSeconds" ? 900 : 100000}
-                    step="any"
-                    disabled={workspace.user.role !== "admin"}
-                    value={value}
-                    onChange={(e) =>
-                      setValues({ ...values, [key]: Number(e.target.value) })
-                    }
-                  />
-                </div>
+                <TextField
+                  key={key}
+                  label={policyLabels[key] || key}
+                  id={"policy-" + key}
+                  type="number"
+                  required
+                  min={key === "taPerKm" ? 0 : 1}
+                  max={key === "trackingIntervalSeconds" ? 900 : 100000}
+                  step="any"
+                  disabled={workspace.user.role !== "admin"}
+                  value={value}
+                  onChange={(e) =>
+                    setValues({ ...values, [key]: Number(e.target.value) })
+                  }
+                />
               ))}
             </div>
             {error && <Notice tone="error">{error}</Notice>}
@@ -256,20 +254,19 @@ export function Account() {
           ["new", "New password", next, setNext],
           ["confirm", "Confirm new password", confirm, setConfirm],
         ].map(([key, title, value, set]) => (
-          <div className="field" key={key as string}>
-            <label htmlFor={"pass-" + key}>{title as string}</label>
-            <input
-              id={"pass-" + key}
-              type="password"
-              required
-              minLength={key === "current" ? 1 : 12}
-              value={value as string}
-              onChange={(e) => (set as (v: string) => void)(e.target.value)}
-              autoComplete={
-                key === "current" ? "current-password" : "new-password"
-              }
-            />
-          </div>
+          <TextField
+            key={key as string}
+            label={title as string}
+            id={"pass-" + key}
+            type="password"
+            required
+            minLength={key === "current" ? 1 : 12}
+            value={value as string}
+            onChange={(e) => (set as (v: string) => void)(e.target.value)}
+            autoComplete={
+              key === "current" ? "current-password" : "new-password"
+            }
+          />
         ))}
         {error && <Notice tone="error">{error}</Notice>}
         <Button disabled={busy}>

@@ -1,3 +1,10 @@
+import {
+  DateField,
+  FieldShell,
+  SelectField,
+  TextAreaField,
+  TextField,
+} from "./controls";
 import { useState } from "react";
 import { api, json } from "./api";
 import { Button, Notice, Modal } from "./ui";
@@ -115,126 +122,146 @@ export function FieldInput({
           name: r.name || r.title || r.id,
         }));
   const id = "field-" + f.key;
-  return (
-    <div
-      className={`field ${["textarea", "multireference", "file"].includes(f.type) ? "full" : ""}`}
-    >
-      <label htmlFor={id}>
-        {f.label}
-        {f.required ? " *" : ""}
-      </label>
-      {f.type === "select" || f.type === "reference" ? (
-        <select
-          id={id}
-          required={f.required}
-          value={value || ""}
-          onChange={(e) => onChange(e.target.value)}
-        >
-          <option value="">Select {f.label.toLowerCase()}</option>
-          {f.options?.map((o) => (
-            <option key={o}>{o}</option>
-          ))}
-          {options.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.name}
-            </option>
-          ))}
-        </select>
-      ) : f.type === "multireference" ? (
-        <select
-          id={id}
-          multiple
-          value={value || []}
-          onChange={(e) =>
-            onChange(Array.from(e.target.selectedOptions).map((o) => o.value))
-          }
-        >
-          {options.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.name}
-            </option>
-          ))}
-        </select>
-      ) : f.type === "textarea" ? (
-        <textarea
-          id={id}
-          required={f.required}
-          value={value || ""}
-          maxLength={5000}
-          rows={3}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      ) : f.type === "file" ? (
-        <>
-          <input
-            id={id}
-            type="file"
-            accept=".pdf,.png,.jpg,.jpeg"
-            disabled={uploading}
-            onChange={async (e) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              setUploading(true);
-              setError("");
-              try {
-                const body = new FormData();
-                body.append("file", file);
-                const a = await api("/attachments", { method: "POST", body });
-                onChange(a.id);
-              } catch (e) {
-                setError((e as Error).message);
-              } finally {
-                setUploading(false);
-              }
-            }}
-          />
-          {uploading ? (
-            <small>Uploading…</small>
-          ) : (
-            value && (
-              <small>
-                Attachment saved ·{" "}
-                <a href={"/api/attachments/" + value}>Download</a>{" "}
-                <button
-                  type="button"
-                  className="text-button"
-                  onClick={() => onChange("")}
-                >
-                  Remove
-                </button>
-              </small>
-            )
-          )}
-          {error && <small className="error-text">{error}</small>}
-        </>
-      ) : (
+  const label = f.label;
+  const hint = f.hint || "";
+  if (f.type === "select" || f.type === "reference")
+    return (
+      <SelectField
+        label={label}
+        id={id}
+        hint={hint}
+        required={f.required}
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">Select {f.label.toLowerCase()}</option>
+        {f.options?.map((o) => (
+          <option key={o}>{o}</option>
+        ))}
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.name}
+          </option>
+        ))}
+      </SelectField>
+    );
+  if (f.type === "multireference")
+    return (
+      <SelectField
+        label={label}
+        id={id}
+        className="full"
+        hint={hint || "Hold Ctrl / Command to select multiple entries."}
+        multiple
+        value={value || []}
+        onChange={(e) =>
+          onChange(Array.from(e.target.selectedOptions).map((o) => o.value))
+        }
+      >
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.name}
+          </option>
+        ))}
+      </SelectField>
+    );
+  if (f.type === "textarea")
+    return (
+      <TextAreaField
+        label={label}
+        id={id}
+        hint={hint}
+        required={f.required}
+        value={value || ""}
+        maxLength={5000}
+        rows={3}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  if (f.type === "date")
+    return (
+      <DateField
+        label={label}
+        id={id}
+        hint={hint}
+        required={f.required}
+        min={f.min}
+        max={f.max}
+        value={value ?? ""}
+        onChange={onChange}
+      />
+    );
+  if (f.type === "file")
+    return (
+      <FieldShell
+        label={label}
+        id={id}
+        className="full"
+        required={f.required}
+        error={error}
+      >
         <input
           id={id}
-          type={
-            f.type === "number" ? "number" : f.type === "date" ? "date" : "text"
-          }
-          required={f.required}
-          min={f.min}
-          max={f.max}
-          step={f.type === "number" ? "any" : undefined}
-          maxLength={f.type === "text" ? 5000 : undefined}
-          value={value ?? ""}
-          onChange={(e) =>
-            onChange(
-              f.type === "number" && e.target.value !== ""
-                ? Number(e.target.value)
-                : e.target.value,
-            )
-          }
+          type="file"
+          className="control"
+          accept=".pdf,.png,.jpg,.jpeg"
+          disabled={uploading}
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            setUploading(true);
+            setError("");
+            try {
+              const body = new FormData();
+              body.append("file", file);
+              const a = await api("/attachments", { method: "POST", body });
+              onChange(a.id);
+            } catch (e) {
+              setError((e as Error).message);
+            } finally {
+              setUploading(false);
+            }
+          }}
         />
-      )}
-      <small>
-        {f.hint ||
-          (f.type === "multireference"
-            ? "Hold Ctrl / Command to select multiple entries."
-            : "")}
-      </small>
-    </div>
+        {uploading ? (
+          <small>Uploading…</small>
+        ) : (
+          value && (
+            <small>
+              Attachment saved ·{" "}
+              <a href={"/api/attachments/" + value}>Download</a>{" "}
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => onChange("")}
+              >
+                Remove
+              </button>
+            </small>
+          )
+        )}
+      </FieldShell>
+    );
+  return (
+    <TextField
+      label={label}
+      id={id}
+      hint={hint}
+      type={f.type === "number" ? "number" : "text"}
+      required={f.required}
+      min={f.min}
+      max={f.max}
+      step={f.type === "number" ? "any" : undefined}
+      maxLength={f.type === "text" ? 5000 : undefined}
+      value={value ?? ""}
+      onChange={(e) =>
+        onChange(
+          f.type === "number" && e.target.value !== ""
+            ? Number(e.target.value)
+            : e.target.value,
+        )
+      }
+    />
   );
 }
 export function RecordDetail({
@@ -362,25 +389,21 @@ export function RecordDetail({
       )}
       {r.kind === "challan" && own && r.status === "active" && (
         <div className="form-grid">
-          <div className="field">
-            <label htmlFor="received">Received quantity</label>
-            <input
-              id="received"
-              type="number"
-              min={0}
-              max={r.quantity}
-              value={received}
-              onChange={(e) => setReceived(Number(e.target.value))}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="ack-notes">Discrepancy notes</label>
-            <input
-              id="ack-notes"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </div>
+          <TextField
+            label="Received quantity"
+            id="received"
+            type="number"
+            min={0}
+            max={r.quantity}
+            value={received}
+            onChange={(e) => setReceived(Number(e.target.value))}
+          />
+          <TextField
+            label="Discrepancy notes"
+            id="ack-notes"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
           <Button
             disabled={busy}
             onClick={() =>
@@ -397,17 +420,13 @@ export function RecordDetail({
       )}
       {r.status === "pending" && !own && workspace.user.role !== "rep" && (
         <>
-          <div className="field">
-            <label htmlFor="decision-reason">
-              Decision note (required for return / rejection)
-            </label>
-            <textarea
-              id="decision-reason"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              rows={3}
-            />
-          </div>
+          <TextAreaField
+            label="Decision note (required for return / rejection)"
+            id="decision-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={3}
+          />
           <div className="form-actions">
             <Button
               danger

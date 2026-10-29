@@ -18,6 +18,7 @@ import {
   useResource,
 } from "./ui";
 import { money } from "../../../packages/shared/src/index.ts";
+import { DateField, SelectField, TextAreaField, TextField } from "./controls";
 const todayIst = () =>
   new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 const monthStart = () => todayIst().slice(0, 7) + "-01";
@@ -38,24 +39,18 @@ function useRange() {
 function RangeFields({ r }: { r: ReturnType<typeof useRange> }) {
   return (
     <>
-      <label>
-        From
-        <input
-          type="date"
-          value={r.from}
-          max={r.to}
-          onChange={(e) => e.target.value && r.setFrom(e.target.value)}
-        />
-      </label>
-      <label>
-        To
-        <input
-          type="date"
-          value={r.to}
-          min={r.from}
-          onChange={(e) => e.target.value && r.setTo(e.target.value)}
-        />
-      </label>
+      <DateField
+        label="From"
+        value={r.from}
+        max={r.to}
+        onChange={(v) => v && r.setFrom(v)}
+      />
+      <DateField
+        label="To"
+        value={r.to}
+        min={r.from}
+        onChange={(v) => v && r.setTo(v)}
+      />
     </>
   );
 }
@@ -87,19 +82,20 @@ function RepSelect({
   const { workspace } = useWorkspace();
   if (workspace.user.role === "rep") return null;
   return (
-    <label>
-      Representative
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">All representatives</option>
-        {workspace.users
-          .filter((u) => u.role === "rep")
-          .map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name}
-            </option>
-          ))}
-      </select>
-    </label>
+    <SelectField
+      label="Representative"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">All representatives</option>
+      {workspace.users
+        .filter((u) => u.role === "rep")
+        .map((u) => (
+          <option key={u.id} value={u.id}>
+            {u.name}
+          </option>
+        ))}
+    </SelectField>
   );
 }
 /* ---------------- A43 Export center ---------------- */
@@ -249,28 +245,25 @@ export function OrdersPage() {
       />
       <PobTabs active="orders" />
       <div className="filter-bar">
-        <label className="grow">
-          Search
-          <input
-            type="search"
-            placeholder="Order number, customer or representative"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-        </label>
+        <TextField
+          label="Search"
+          className="grow"
+          type="search"
+          placeholder="Order number, customer or representative"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
         <RepSelect value={owner} onChange={setOwner} />
         <RangeFields r={range} />
-        <label>
-          Location
-          <select
-            value={verified}
-            onChange={(e) => setVerified(e.target.value)}
-          >
-            <option value="">All calls</option>
-            <option value="yes">Verified</option>
-            <option value="no">Needs review</option>
-          </select>
-        </label>
+        <SelectField
+          label="Location"
+          value={verified}
+          onChange={(e) => setVerified(e.target.value)}
+        >
+          <option value="">All calls</option>
+          <option value="yes">Verified</option>
+          <option value="no">Needs review</option>
+        </SelectField>
       </div>
       <Loaded state={state}>
         {(d: any) => (
@@ -790,26 +783,22 @@ export function Evidence() {
                   {ev.canReview ? (
                     <>
                       {error && <Notice tone="error">{error}</Notice>}
-                      <div className="field">
-                        <label htmlFor="review-decision">Decision</label>
-                        <select
-                          id="review-decision"
-                          value={decision}
-                          onChange={(e) => setDecision(e.target.value)}
-                        >
-                          <option value="accept">Accept the reason</option>
-                          <option value="flag">Flag for follow-up</option>
-                        </select>
-                      </div>
-                      <div className="field">
-                        <label htmlFor="review-note">Note (required)</label>
-                        <textarea
-                          id="review-note"
-                          rows={3}
-                          value={note}
-                          onChange={(e) => setNote(e.target.value)}
-                        />
-                      </div>
+                      <SelectField
+                        label="Decision"
+                        id="review-decision"
+                        value={decision}
+                        onChange={(e) => setDecision(e.target.value)}
+                      >
+                        <option value="accept">Accept the reason</option>
+                        <option value="flag">Flag for follow-up</option>
+                      </SelectField>
+                      <TextAreaField
+                        label="Note (required)"
+                        id="review-note"
+                        rows={3}
+                        value={note}
+                        onChange={(e) => setNote(e.target.value)}
+                      />
                       <Button
                         disabled={busy || note.trim().length < 5}
                         onClick={submit}
@@ -1292,29 +1281,23 @@ function TicketDialog({
         </Notice>
       )}
       {error && <Notice tone="error">{error}</Notice>}
-      <div className="field">
-        <label htmlFor="ticket-status">Status</label>
-        <select
-          id="ticket-status"
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-        >
-          <option value="open">Open</option>
-          <option value="in_progress">In progress</option>
-          <option value="resolved">Resolved</option>
-        </select>
-      </div>
-      <div className="field">
-        <label htmlFor="ticket-response">
-          Response shown to the employee in the app
-        </label>
-        <textarea
-          id="ticket-response"
-          rows={3}
-          value={response}
-          onChange={(e) => setResponse(e.target.value)}
-        />
-      </div>
+      <SelectField
+        label="Status"
+        id="ticket-status"
+        value={status}
+        onChange={(e) => setStatus(e.target.value)}
+      >
+        <option value="open">Open</option>
+        <option value="in_progress">In progress</option>
+        <option value="resolved">Resolved</option>
+      </SelectField>
+      <TextAreaField
+        label="Response shown to the employee in the app"
+        id="ticket-response"
+        rows={3}
+        value={response}
+        onChange={(e) => setResponse(e.target.value)}
+      />
       <div className="form-actions">
         <Button secondary onClick={onClose}>
           Cancel

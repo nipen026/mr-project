@@ -14,6 +14,7 @@ import {
   Table,
   useResource,
 } from "./ui";
+import { DateField, SelectField } from "./controls";
 export function TrackingPage() {
   const { workspace, version } = useWorkspace();
   const users = workspace.users.filter((u) => u.role === "rep");
@@ -71,27 +72,22 @@ export function TrackingPage() {
         }
       />
       <div className="filter-bar">
-        <label>
-          Representative
-          <select
-            value={employee}
-            onChange={(e) => setEmployee(e.target.value)}
-          >
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Activity date
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
-        </label>
+        <SelectField
+          label="Representative"
+          value={employee}
+          onChange={(e) => setEmployee(e.target.value)}
+        >
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+            </option>
+          ))}
+        </SelectField>
+        <DateField
+          label="Activity date"
+          value={date}
+          onChange={(v) => setDate(v)}
+        />
         {data && <Badge status={data.state.replaceAll("_", " ")} />}
       </div>
       {error ? (

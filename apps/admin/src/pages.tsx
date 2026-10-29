@@ -25,6 +25,7 @@ import {
   type RecordData,
   type User,
 } from "../../../packages/shared/src/index.ts";
+import { DateField, SelectField, TextField } from "./controls";
 export function Overview() {
   const { workspace, version } = useWorkspace();
   const [date, setDate] = useState(
@@ -71,27 +72,25 @@ export function Overview() {
         }
       />
       <div className="filter-bar">
-        <label>
-          Reporting date
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
-        </label>
-        <label>
-          Representative
-          <select value={owner} onChange={(e) => setOwner(e.target.value)}>
-            <option value="">All representatives</option>
-            {workspace.users
-              .filter((u) => u.role === "rep")
-              .map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
-              ))}
-          </select>
-        </label>
+        <DateField
+          label="Reporting date"
+          value={date}
+          onChange={(v) => setDate(v)}
+        />
+        <SelectField
+          label="Representative"
+          value={owner}
+          onChange={(e) => setOwner(e.target.value)}
+        >
+          <option value="">All representatives</option>
+          {workspace.users
+            .filter((u) => u.role === "rep")
+            .map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+        </SelectField>
         <span className="filter-hint">
           <Icon name="list-filter" />
           Your permitted team
@@ -303,28 +302,28 @@ export function RecordsPage({ kind }: { kind: string }) {
         </div>
       )}
       <div className="filter-bar">
-        <label className="grow">
-          Search
-          <input
-            type="search"
-            placeholder={"Search " + mod.title.toLowerCase()}
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-        </label>
-        <label>
-          Status
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="">All statuses</option>
-            {[
-              ...new Set((workspace.records[kind] || []).map((r) => r.status)),
-            ].map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
+        <TextField
+          label="Search"
+          className="grow"
+          type="search"
+          placeholder={"Search " + mod.title.toLowerCase()}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <SelectField
+          label="Status"
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+        >
+          <option value="">All statuses</option>
+          {[
+            ...new Set((workspace.records[kind] || []).map((r) => r.status)),
+          ].map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </SelectField>
         <span className="filter-hint">{rows.length} records</span>
       </div>
       {kind === "customer" && (
@@ -497,15 +496,14 @@ export function Team() {
         }
       />
       <div className="filter-bar">
-        <label className="grow">
-          Search team
-          <input
-            type="search"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Name or email"
-          />
-        </label>
+        <TextField
+          label="Search team"
+          className="grow"
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Name or email"
+        />
         <Link className="button secondary" to="/module/territory">
           Territories & HQ
         </Link>
@@ -628,82 +626,67 @@ function UserForm({
             ["name", "Full name"],
             ["email", "Email / user ID"],
           ].map(([key, title]) => (
-            <div className="field" key={key}>
-              <label htmlFor={"employee-" + key}>{title} *</label>
-              <input
-                id={"employee-" + key}
-                required
-                type={key === "email" ? "email" : "text"}
-                value={v[key]}
-                onChange={(e) => setV({ ...v, [key]: e.target.value })}
-              />
-            </div>
+            <TextField
+              key={key}
+              label={title}
+              id={"employee-" + key}
+              required
+              type={key === "email" ? "email" : "text"}
+              value={v[key]}
+              onChange={(e) => setV({ ...v, [key]: e.target.value })}
+            />
           ))}
-          <div className="field">
-            <label htmlFor="role">Role</label>
-            <select
-              id="role"
-              value={v.role}
-              onChange={(e) => setV({ ...v, role: e.target.value })}
-            >
-              {["rep", "manager", "admin"].map((role) => (
-                <option key={role}>{role}</option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="manager">Reports to</label>
-            <select
-              id="manager"
-              value={v.managerId || ""}
-              onChange={(e) =>
-                setV({ ...v, managerId: e.target.value || null })
-              }
-            >
-              <option value="">No manager</option>
-              {workspace.users
-                .filter((u) => u.role !== "rep" && u.id !== initial?.id)
-                .map((u) => (
-                  <option value={u.id} key={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="territory">Head quarter</label>
-            <select
-              id="territory"
-              value={v.territoryId || ""}
-              onChange={(e) =>
-                setV({ ...v, territoryId: e.target.value || null })
-              }
-            >
-              <option value="">Unassigned</option>
-              {workspace.records.territory?.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
+          <SelectField
+            label="Role"
+            id="role"
+            value={v.role}
+            onChange={(e) => setV({ ...v, role: e.target.value })}
+          >
+            {["rep", "manager", "admin"].map((role) => (
+              <option key={role}>{role}</option>
+            ))}
+          </SelectField>
+          <SelectField
+            label="Reports to"
+            id="manager"
+            value={v.managerId || ""}
+            onChange={(e) => setV({ ...v, managerId: e.target.value || null })}
+          >
+            <option value="">No manager</option>
+            {workspace.users
+              .filter((u) => u.role !== "rep" && u.id !== initial?.id)
+              .map((u) => (
+                <option value={u.id} key={u.id}>
+                  {u.name}
                 </option>
               ))}
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="new-pass">
-              {initial ? "Reset password (optional)" : "Initial password *"}
-            </label>
-            <input
-              id="new-pass"
-              type="password"
-              autoComplete="new-password"
-              minLength={12}
-              required={!initial}
-              value={v.password}
-              onChange={(e) => setV({ ...v, password: e.target.value })}
-            />
-            <small>
-              At least 12 characters. Employee must change it at next sign-in.
-            </small>
-          </div>
+          </SelectField>
+          <SelectField
+            label="Head quarter"
+            id="territory"
+            value={v.territoryId || ""}
+            onChange={(e) =>
+              setV({ ...v, territoryId: e.target.value || null })
+            }
+          >
+            <option value="">Unassigned</option>
+            {workspace.records.territory?.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
+          </SelectField>
+          <TextField
+            label={initial ? "Reset password (optional)" : "Initial password"}
+            id="new-pass"
+            type="password"
+            autoComplete="new-password"
+            minLength={12}
+            required={!initial}
+            hint="At least 12 characters. Employee must change it at next sign-in."
+            value={v.password}
+            onChange={(e) => setV({ ...v, password: e.target.value })}
+          />
           <label className="checkbox">
             <input
               type="checkbox"
@@ -809,34 +792,29 @@ export function Reports() {
         }
       />
       <div className="filter-bar">
-        <label>
-          Report
-          <select value={type} onChange={(e) => setType(e.target.value)}>
-            {names.map((n) => (
-              <option key={n} value={n}>
-                {n.replaceAll("-", " ")}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          From
-          <input
-            type="date"
-            value={from}
-            max={to}
-            onChange={(e) => e.target.value && setFrom(e.target.value)}
-          />
-        </label>
-        <label>
-          To
-          <input
-            type="date"
-            value={to}
-            min={from}
-            onChange={(e) => e.target.value && setTo(e.target.value)}
-          />
-        </label>
+        <SelectField
+          label="Report"
+          value={type}
+          onChange={(e) => setType(e.target.value)}
+        >
+          {names.map((n) => (
+            <option key={n} value={n}>
+              {n.replaceAll("-", " ")}
+            </option>
+          ))}
+        </SelectField>
+        <DateField
+          label="From"
+          value={from}
+          max={to}
+          onChange={(v) => v && setFrom(v)}
+        />
+        <DateField
+          label="To"
+          value={to}
+          min={from}
+          onChange={(v) => v && setTo(v)}
+        />
       </div>
       {visualReports.includes(type) ? (
         <VisualReport type={type} from={from} to={to} />
@@ -1023,35 +1001,33 @@ function ImportCustomers({ onClose }: { onClose: () => void }) {
       >
         Download template
       </Button>
-      <div className="field">
-        <label htmlFor="csv-import">Customer CSV</label>
-        <input
-          id="csv-import"
-          type="file"
-          accept=".csv,text/csv"
-          onChange={async (e) => {
-            setError("");
-            try {
-              const file = e.target.files?.[0];
-              if (file) {
-                if (file.size > 2 * 1024 * 1024)
-                  throw new Error("Maximum CSV size is 2 MB");
-                const parsed = parseCsv(await file.text());
-                if (parsed.length > 1000)
-                  throw new Error("Maximum 1,000 customers per import");
-                setRows(
-                  parsed.map((r) => ({
-                    ...r,
-                    ...(r.frequency ? { frequency: Number(r.frequency) } : {}),
-                  })),
-                );
-              }
-            } catch (e) {
-              setError((e as Error).message);
+      <TextField
+        label="Customer CSV"
+        id="csv-import"
+        type="file"
+        accept=".csv,text/csv"
+        onChange={async (e) => {
+          setError("");
+          try {
+            const file = e.target.files?.[0];
+            if (file) {
+              if (file.size > 2 * 1024 * 1024)
+                throw new Error("Maximum CSV size is 2 MB");
+              const parsed = parseCsv(await file.text());
+              if (parsed.length > 1000)
+                throw new Error("Maximum 1,000 customers per import");
+              setRows(
+                parsed.map((r) => ({
+                  ...r,
+                  ...(r.frequency ? { frequency: Number(r.frequency) } : {}),
+                })),
+              );
             }
-          }}
-        />
-      </div>
+          } catch (e) {
+            setError((e as Error).message);
+          }
+        }}
+      />
       {rows.length > 0 && (
         <>
           <p>{rows.length} customers ready for validation. Preview:</p>
