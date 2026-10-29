@@ -5,7 +5,7 @@ import {
   TextAreaField,
   TextField,
 } from "./controls";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, json } from "./api";
 import { Button, Notice, Modal } from "./ui";
 import { useWorkspace, label } from "./context";
@@ -283,6 +283,20 @@ export function RecordDetail({
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const mod = workspace.modules.find((m) => m.key === r.kind);
+  // A daily report stores visit ids; show the calls themselves instead.
+  const [calls, setCalls] = useState<any[] | null>(null);
+  useEffect(() => {
+    if (r.kind !== "dcr") return;
+    api(`/records/visit?ownerId=${r.ownerId}&date=${r.date}`)
+      .then((d) =>
+        setCalls(
+          d.items.filter(
+            (v: any) => !r.visitIds?.length || r.visitIds.includes(v.id),
+          ),
+        ),
+      )
+      .catch(() => setCalls([]));
+  }, [r.id, r.kind]);
   const own = r.ownerId === workspace.user.id,
     admin = workspace.user.role === "admin";
   const unlocked = ["draft", "active", "returned"].includes(r.status);
@@ -339,7 +353,7 @@ export function RecordDetail({
       title={
         r.name ||
         r.title ||
-        `${mod?.singular || r.kind} · ${r.date || r.ownerName}`
+        `${mod?.singular || (r.kind === "dcr" ? "Daily call report" : r.kind)} · ${r.date || r.ownerName}`
       }
       onClose={onClose}
       wide
@@ -351,25 +365,68 @@ export function RecordDetail({
         <span className={"badge " + r.status}>{r.status}</span>
       </div>
       <dl className="details">
-        {fields.map((f) => (
-          <div key={f.key}>
-            <dt>{f.label}</dt>
-            <dd>
-              {f.type === "file" && r[f.key] ? (
-                <a href={"/api/attachments/" + r[f.key]}>Download attachment</a>
-              ) : Array.isArray(r[f.key]) && typeof r[f.key][0] === "object" ? (
-                r[f.key].map((v: any, i: number) => (
-                  <div key={i}>
-                    {label(workspace, "itemId", v.itemId)} × {v.quantity}
-                    {v.total !== undefined ? " · ₹" + v.total : ""}
-                  </div>
-                ))
-              ) : (
-                label(workspace, f.key, r[f.key])
-              )}
-            </dd>
-          </div>
-        ))}
+        {fields.map((f) =>
+          f.key === "visitIds" ? (
+            <div key={f.key} className="full">
+              <dt>Calls included</dt>
+              <dd className="call-list">
+                {calls === null
+                  ? "Loading calls…"
+                  : calls.length === 0
+                    ? "—"
+                    : calls.map((v) => (
+                        <div key={v.id} className="call-row">
+                          <strong>{v.customerName}</strong>
+                          <span>{v.customerType}</span>
+                          <span>
+                            {v.visitedAt
+                              ? new Date(v.visitedAt).toLocaleTimeString(
+                                  "en-IN",
+                                  {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    timeZone: "Asia/Kolkata",
+                                  },
+                                )
+                              : "—"}
+                          </span>
+                          <span>
+                            {v.orderTotal ? "₹" + v.orderTotal : "No order"}
+                          </span>
+                          <span
+                            className={
+                              "badge " + (v.verified ? "Verified" : "stale")
+                            }
+                          >
+                            {v.verified ? "Verified" : "Needs review"}
+                          </span>
+                        </div>
+                      ))}
+              </dd>
+            </div>
+          ) : (
+            <div key={f.key}>
+              <dt>{f.label}</dt>
+              <dd>
+                {f.type === "file" && r[f.key] ? (
+                  <a href={"/api/attachments/" + r[f.key]}>
+                    Download attachment
+                  </a>
+                ) : Array.isArray(r[f.key]) &&
+                  typeof r[f.key][0] === "object" ? (
+                  r[f.key].map((v: any, i: number) => (
+                    <div key={i}>
+                      {label(workspace, "itemId", v.itemId)} × {v.quantity}
+                      {v.total !== undefined ? " · ₹" + v.total : ""}
+                    </div>
+                  ))
+                ) : (
+                  label(workspace, f.key, r[f.key])
+                )}
+              </dd>
+            </div>
+          ),
+        )}
       </dl>
       {r.decisions?.length > 0 && (
         <div className="history">

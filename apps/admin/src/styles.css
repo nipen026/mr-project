@@ -1986,3 +1986,33 @@ tbody tr {
 .control-trigger {
   text-transform: capitalize;
 }
+/* Record values are data, not labels: keep them exactly as entered. */
+.details dd {
+  text-transform: none;
+}
+.details .full {
+  grid-column: 1 / -1;
+}
+.call-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.call-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) 1fr 0.8fr 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--canvas);
+  border-radius: 12px;
+  font-size: 13px;
+}
+.call-row span:not(.badge) {
+  color: var(--muted);
+}
+@media (max-width: 640px) {
+  .call-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
