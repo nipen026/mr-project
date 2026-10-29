@@ -73,12 +73,14 @@ function Popover({
   anchor,
   onClose,
   minWidth,
+  fit,
   children,
   label,
 }: {
   anchor: React.RefObject<HTMLElement | null>;
   onClose: () => void;
   minWidth?: number;
+  fit?: boolean;
   children: ReactNode;
   label: string;
 }) {
@@ -94,15 +96,28 @@ function Popover({
     const b = box.current;
     if (!a || !b) return;
     const gap = 6;
-    const below = window.innerHeight - a.bottom - gap;
-    const up = below < b.offsetHeight && a.top > below;
-    const width = Math.max(a.width, minWidth || 0);
+    const edge = 8;
+    // scrollHeight is the full content height even when max-height is set.
+    const natural = b.scrollHeight + 2;
+    const below = window.innerHeight - a.bottom - gap - edge;
+    const above = a.top - gap - edge;
+    const up = below < natural && above > below;
+    const viewport = window.innerHeight - edge * 2;
+    // Too little room on either side: let it overlap the field instead of cutting it off.
+    const roomy =
+      (up ? above : below) >= (fit ? natural : Math.min(natural, 260));
+    const room = roomy ? (up ? above : below) : viewport;
+    const height = Math.min(natural, room);
+    const width = fit ? b.offsetWidth : Math.max(a.width, minWidth || 0);
+    const wanted = up ? a.top - gap - height : a.bottom + gap;
     setStyle({
       position: "fixed",
-      left: Math.max(8, Math.min(a.left, window.innerWidth - width - 8)),
-      top: up ? Math.max(8, a.top - b.offsetHeight - gap) : a.bottom + gap,
-      minWidth: width,
-      maxHeight: Math.max(160, (up ? a.top : below) - 16),
+      left: Math.max(edge, Math.min(a.left, window.innerWidth - width - edge)),
+      top: roomy
+        ? wanted
+        : Math.min(Math.max(wanted, edge), window.innerHeight - height - edge),
+      ...(fit ? {} : { minWidth: width }),
+      maxHeight: room,
       opacity: 1,
     });
   };
@@ -402,7 +417,7 @@ export function DateField({
           <Popover
             anchor={wrap}
             onClose={() => setOpen(false)}
-            minWidth={296}
+            fit
             label={label}
           >
             <Calendar
