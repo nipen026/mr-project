@@ -67,7 +67,13 @@ export class Insights {
         description: "Calculated report rows for the selected date range.",
       }));
     const records = [
-      ...modules.filter((m) => !m.adminOnly || u.role === "admin"),
+      ...(
+        await Promise.all(
+          modules.map(async (m) =>
+            (await this.s.can(u, m.key, "read")) ? m : null,
+          ),
+        )
+      ).filter((m): m is (typeof modules)[number] => !!m),
     ].map((m) => ({
       key: "records:" + m.key,
       group: "Records",
@@ -137,11 +143,7 @@ export class Insights {
       }));
     const mod = moduleByKey[name];
     assert(mod, 404, "Export not found");
-    assert(
-      !mod.adminOnly || u.role === "admin",
-      403,
-      "Administrator access required",
-    );
+    await this.s.requireAccess(u, name, "read");
     return (await this.s.list(u, name, query)).map((r) => ({
       ...Object.fromEntries(mod.columns.map((k) => [k, resolve(r[k])])),
       status: r.status,

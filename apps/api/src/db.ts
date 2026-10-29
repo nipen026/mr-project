@@ -43,6 +43,7 @@ const tables = (d: Dialect) => {
     "CREATE TABLE IF NOT EXISTS preferences(user_id TEXT PRIMARY KEY REFERENCES users(id),language TEXT NOT NULL DEFAULT 'en',updated_at TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS customer_addresses(id TEXT PRIMARY KEY,tenant_id TEXT NOT NULL,customer_id TEXT NOT NULL REFERENCES records(id),label TEXT NOT NULL,line TEXT NOT NULL,city TEXT NOT NULL DEFAULT '',state TEXT NOT NULL DEFAULT '',pin_code TEXT NOT NULL DEFAULT '',version INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
     "CREATE INDEX IF NOT EXISTS address_customer ON customer_addresses(tenant_id,customer_id)",
+    "CREATE TABLE IF NOT EXISTS role_permissions(tenant_id TEXT NOT NULL REFERENCES tenants(id),role TEXT NOT NULL,module TEXT NOT NULL,can_read INTEGER NOT NULL,can_write INTEGER NOT NULL,updated_by TEXT,updated_at TEXT NOT NULL,PRIMARY KEY(tenant_id,role,module))",
   ];
 };
 /** Tables in dependency order, used by migrations and tests. */

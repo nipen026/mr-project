@@ -57,3 +57,15 @@ Kinds and exact required fields are defined in `packages/shared/src/index.ts` an
 Visit request: customerId, planId, visitedAt (ISO instant), outcome, remarks, optional campaignId, location `{latitude,longitude,accuracy,observedAt,mocked}` or null, exceptionReason, detailedProductIds, samples/inputs `{itemId,quantity}[]`, orderLines `{itemId,quantity}[]`. Order prices and totals come from the server. Missing/stale/mock/inaccurate/out-of-radius location requires an explanation and remains unverified. Each stock operation and visit commits or rolls back together.
 
 All business dates use Asia/Kolkata; instants use UTC ISO strings. Tracking freshness is calculated from observation time, never upload time. Gaps are not assigned a reason unless an actual device event supports it. Recorded distance excludes gaps and low-quality/mock fixes; it is not a certified travel allowance measurement.
+
+## Role permissions (Read / Write)
+
+Administrators choose which modules each role can Read and Write. Defaults match the built-in rules; saved choices are stored per company in `role_permissions`. Write implies Read. Administrator access is fixed and cannot be restricted.
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/api/permissions` | Admin only. Modules plus the Read/Write matrix for every role. |
+| PUT | `/api/permissions/:role` | Admin only. Body `{ "access": { "<module>": { "read": true, "write": false } } }`. `:role` is `manager` or `rep`. |
+| POST | `/api/permissions/:role/reset` | Admin only. Restores the defaults for the role. |
+
+Enforced on record list, create, update and delete, exports, `/api/catalog`, `/api/bootstrap` and `/api/access`. A missing permission returns 403. Admin UI: Settings → Permissions.

@@ -415,3 +415,83 @@ test("roles matrix comes from the enforced rules and performance matches the pro
     400,
   );
 });
+test("administrators configure Read and Write per role and the API enforces it", async () => {
+  const matrix = await result("GET", "/permissions");
+  assert.equal(matrix.roles[0].locked, true);
+  assert.equal(
+    (await req("GET", "/permissions", undefined, "manager")).statusCode,
+    403,
+  );
+  // Defaults: representatives can read announcements but not publish them.
+  const before = (await result("GET", "/permissions")).roles.find(
+    (r: any) => r.role === "rep",
+  );
+  assert.deepEqual(before.access.announcement, { read: true, write: false });
+  assert.equal(
+    (await req("GET", "/records/expense", undefined, "aman")).statusCode,
+    200,
+  );
+  // Remove Read from expenses for representatives.
+  const saved = await result("PUT", "/permissions/rep", {
+    access: { expense: { read: false, write: true } },
+  });
+  // Write implies Read.
+  assert.deepEqual(
+    saved.roles.find((r: any) => r.role === "rep").access.expense,
+    { read: true, write: true },
+  );
+  await result("PUT", "/permissions/rep", {
+    access: { expense: { read: false, write: false } },
+  });
+  assert.equal(
+    (await req("GET", "/records/expense", undefined, "aman")).statusCode,
+    403,
+  );
+  const access = await result("GET", "/access", undefined, "aman");
+  assert.equal(
+    access.modules.find((m: any) => m.key === "expense").read,
+    false,
+  );
+  const boot = await result("GET", "/bootstrap", undefined, "aman");
+  assert.ok(!boot.modules.some((m: any) => m.key === "expense"));
+  // Grant Write on announcements to managers only.
+  await result("PUT", "/permissions/manager", {
+    access: { announcement: { read: true, write: true } },
+  });
+  assert.equal(
+    (await req("POST", "/records/announcement", {}, "manager")).statusCode,
+    400,
+  );
+  assert.equal(
+    (await req("POST", "/records/announcement", {}, "aman")).statusCode,
+    403,
+  );
+  // Administrators cannot be restricted; unknown modules are rejected.
+  assert.equal(
+    (
+      await req("PUT", "/permissions/admin", {
+        access: { expense: { read: false, write: false } },
+      })
+    ).statusCode,
+    400,
+  );
+  assert.equal(
+    (
+      await req("PUT", "/permissions/rep", {
+        access: { nothing: { read: true, write: true } },
+      })
+    ).statusCode,
+    400,
+  );
+  // Restore defaults.
+  const reset = await result("POST", "/permissions/rep/reset", {});
+  assert.equal(
+    reset.roles.find((r: any) => r.role === "rep").customized,
+    false,
+  );
+  assert.equal(
+    (await req("GET", "/records/expense", undefined, "aman")).statusCode,
+    200,
+  );
+  await result("POST", "/permissions/manager/reset", {});
+});

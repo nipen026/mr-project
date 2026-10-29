@@ -1462,3 +1462,59 @@ tbody tr:hover {
     display: none;
   }
 }
+.perm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+}
+.perm-save {
+  border-top: 1px solid var(--line);
+}
+.perm-group {
+  padding: 10px 20px;
+  background: #f3f7f8;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--muted);
+}
+.perm-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px 110px;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--line);
+}
+.perm-head {
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--muted);
+  border-top: 0;
+}
+.perm-row label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.perm-row label b {
+  display: none;
+  font-weight: 600;
+  font-size: 12px;
+}
+@media (max-width: 640px) {
+  .perm-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .perm-row > span:first-child {
+    grid-column: 1 / -1;
+    font-weight: 600;
+  }
+  .perm-head {
+    display: none;
+  }
+  .perm-row label b {
+    display: inline;
+  }
+}

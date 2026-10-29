@@ -23,6 +23,7 @@ import {
   Support,
   preferencesBody,
   ticketBody,
+  permissionsBody,
   ticketUpdate,
 } from "./support.ts";
 import { FieldOps, addressBody } from "./fieldops.ts";
@@ -313,17 +314,21 @@ export async function buildApp(
     reply.clearCookie("mr_session", { path: "/" });
     return { ok: true, message: "Password changed. Sign in again." };
   });
+  const readable = async (u: any) => {
+    const all = await service.permissions(u.tenantId);
+    return modules.filter(
+      (m) => u.role === "admin" || all[u.role]?.[m.key]?.read,
+    );
+  };
   app.get("/api/catalog", async (r) => ({
-    modules: modules.filter((m) => !m.adminOnly || r.user.role === "admin"),
+    modules: await readable(r.user),
     policies: await service.policies(r.user),
     reportNames: reportNames.filter(
       (n) => n !== "audit" || r.user.role === "admin",
     ),
   }));
   app.get("/api/bootstrap", async (r) => {
-    const visibleModules = modules.filter(
-      (m) => !m.adminOnly || r.user.role === "admin",
-    );
+    const visibleModules = await readable(r.user);
     // Independent reads run together, so the screen costs one round trip.
     const [company, policies, preferences, users, lists, inventory, shift] =
       await Promise.all([
@@ -728,8 +733,28 @@ export async function buildApp(
         await support.updateTicket(r.user, id(r), ticketUpdate.parse(r.body)),
     ),
   );
-  app.get("/api/access", async (r) => support.access(r.user));
+  app.get("/api/access", async (r) => await support.access(r.user));
   app.get("/api/roles", async (r) => support.roles(r.user));
+  app.get("/api/permissions", async (r) => {
+    assert(r.user.role === "admin", 403, "Administrator access required");
+    return await support.permissionMatrix(r.user);
+  });
+  app.put("/api/permissions/:role", async (r) => {
+    assert(r.user.role === "admin", 403, "Administrator access required");
+    return mutate(r, async () =>
+      support.setPermissions(
+        r.user,
+        (r.params as any).role,
+        permissionsBody.parse(r.body),
+      ),
+    );
+  });
+  app.post("/api/permissions/:role/reset", async (r) => {
+    assert(r.user.role === "admin", 403, "Administrator access required");
+    return mutate(r, async () =>
+      support.resetPermissions(r.user, (r.params as any).role),
+    );
+  });
   app.get("/api/performance", async (r) =>
     insights.performance(r.user, r.query as any),
   );

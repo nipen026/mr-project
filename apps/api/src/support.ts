@@ -225,20 +225,20 @@ export class Support {
     return await this.ticket(u, id);
   }
   // M70: what the signed-in role may open or change.
-  access(u: User) {
+  async access(u: User) {
+    const all = await this.s.permissions(u.tenantId);
     return {
       role: u.role,
       modules: modules.map((m) => {
-        const read = !m.adminOnly || u.role === "admin";
-        const write = (!m.adminOnly && !m.readOnlyForRep) || u.role === "admin";
+        const p = all[u.role]?.[m.key] ?? { read: false, write: false };
         return {
           key: m.key,
           title: m.title,
-          read,
-          write,
-          reason: !read
-            ? "Only company administrators can open this."
-            : !write
+          read: p.read,
+          write: p.write,
+          reason: !p.read
+            ? "Your administrator has not given your role Read access to this."
+            : !p.write
               ? "Your role can view this but not change it."
               : "",
         };
@@ -275,20 +275,97 @@ export class Support {
         settings: "Own account",
       },
     ];
+    const all = await this.s.permissions(u.tenantId);
     return {
       items: rows.map((r) => {
-        const read = modules.filter((m) => !m.adminOnly || r.role === "admin");
-        const write = modules.filter(
-          (m) => (!m.adminOnly && !m.readOnlyForRep) || r.role === "admin",
-        );
+        const row = Object.values(all[r.role]);
         return {
           ...r,
           people: people.get(r.role) || 0,
-          modulesRead: read.length,
-          modulesWrite: write.length,
+          modulesRead: row.filter((p) => p.read).length,
+          modulesWrite: row.filter((p) => p.write).length,
         };
       }),
     };
+  }
+  // Settings → Permissions: the editable Read / Write matrix for every role.
+  async permissionMatrix(u: User) {
+    const all = await this.s.permissions(u.tenantId);
+    const saved = await this.s.store.all(
+      "SELECT DISTINCT role FROM role_permissions WHERE tenant_id=?",
+      u.tenantId,
+    );
+    const custom = new Set(saved.map((r) => r.role));
+    return {
+      modules: modules.map((m) => ({
+        key: m.key,
+        title: m.title,
+        group: m.group,
+      })),
+      roles: [
+        { role: "admin", label: "Administrator", locked: true },
+        { role: "manager", label: "Manager", locked: false },
+        { role: "rep", label: "Representative", locked: false },
+      ].map((r) => ({
+        ...r,
+        customized: custom.has(r.role),
+        access: all[r.role],
+      })),
+    };
+  }
+  async setPermissions(
+    u: User,
+    role: string,
+    input: { access: Record<string, { read: boolean; write: boolean }> },
+  ) {
+    assert(
+      ["manager", "rep"].includes(role),
+      400,
+      "Administrator permissions cannot be changed",
+    );
+    const keys = Object.keys(input.access);
+    for (const k of keys)
+      assert(
+        modules.some((m) => m.key === k),
+        400,
+        "Unknown module " + k,
+      );
+    await this.s.store.transaction(async () => {
+      for (const k of keys) {
+        const write = input.access[k].write;
+        const read = input.access[k].read || write;
+        await this.s.store.run(
+          "INSERT INTO role_permissions(tenant_id,role,module,can_read,can_write,updated_by,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(tenant_id,role,module) DO UPDATE SET can_read=excluded.can_read,can_write=excluded.can_write,updated_by=excluded.updated_by,updated_at=excluded.updated_at",
+          u.tenantId,
+          role,
+          k,
+          read ? 1 : 0,
+          write ? 1 : 0,
+          u.id,
+          now(),
+        );
+      }
+      await this.s.audit(u, "permissions.updated", role, {
+        modules: keys.length,
+      });
+    });
+    return await this.permissionMatrix(u);
+  }
+  async resetPermissions(u: User, role: string) {
+    assert(
+      ["manager", "rep"].includes(role),
+      400,
+      "Administrator permissions cannot be changed",
+    );
+    await this.s.store.transaction(async () => {
+      await this.s.store.run(
+        "DELETE FROM role_permissions WHERE tenant_id=? AND role=?",
+        u.tenantId,
+        role,
+      );
+      await this.s.audit(u, "permissions.reset", role);
+    });
+    return await this.permissionMatrix(u);
   }
   // M63: language preference.
   async preferences(u: User) {
@@ -325,3 +402,9 @@ export const ticketUpdate = z
 export const preferencesBody = z
   .object({ language: z.enum(languages) })
   .strict();
+export const permissionsBody = z.object({
+  access: z.record(
+    z.string(),
+    z.object({ read: z.boolean(), write: z.boolean() }),
+  ),
+});

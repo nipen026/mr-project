@@ -52,6 +52,49 @@ export class Service {
     );
     return { ...defaultPolicies, ...JSON.parse(tenant.policies) };
   }
+  /** Default access for a role; administrators always keep full access. */
+  defaultAccess(role: string, kind: string) {
+    const m = moduleByKey[kind];
+    if (role === "admin") return { read: true, write: true };
+    const read = !m?.adminOnly;
+    return { read, write: read && !m?.readOnlyForRep };
+  }
+  /** Role → module → Read/Write, defaults overlaid with the company's saved choices. */
+  async permissions(tenantId: string) {
+    const saved = await this.store.all(
+      "SELECT role,module,can_read,can_write FROM role_permissions WHERE tenant_id=?",
+      tenantId,
+    );
+    const out: Record<
+      string,
+      Record<string, { read: boolean; write: boolean }>
+    > = {};
+    for (const role of ["admin", "manager", "rep"]) {
+      out[role] = {};
+      for (const m of modules)
+        out[role][m.key] = this.defaultAccess(role, m.key);
+    }
+    for (const r of saved) {
+      if (r.role === "admin" || !out[r.role]?.[r.module]) continue;
+      const write = !!r.can_write;
+      out[r.role][r.module] = { read: !!r.can_read || write, write };
+    }
+    return out;
+  }
+  async can(u: User, kind: string, mode: "read" | "write") {
+    if (u.role === "admin") return true;
+    const all = await this.permissions(u.tenantId);
+    return !!all[u.role]?.[kind]?.[mode];
+  }
+  async requireAccess(u: User, kind: string, mode: "read" | "write") {
+    assert(
+      await this.can(u, kind, mode),
+      403,
+      mode === "read"
+        ? "Your role does not have Read access to this module"
+        : "Your role does not have Write access to this module",
+    );
+  }
   async scope(u: User): Promise<string[]> {
     if (u.role === "rep") return [u.id];
     if (u.role === "admin")
@@ -159,8 +202,7 @@ export class Service {
       404,
       "Unknown module",
     );
-    if (moduleByKey[kind]?.adminOnly)
-      assert(u.role === "admin", 403, "Administrator access required");
+    if (moduleByKey[kind]) await this.requireAccess(u, kind, "read");
     // One round trip: rows, people names, decisions and permissions together.
     const [rows, names, decisions, scope] = await Promise.all([
       this.store.all(
@@ -449,8 +491,7 @@ export class Service {
   async create(u: User, kind: string, input: any, ownerId = u.id) {
     const mod = moduleByKey[kind];
     assert(mod, 404, "Unknown module");
-    if (mod.adminOnly || mod.readOnlyForRep)
-      assert(u.role === "admin", 403, "Administrator access required");
+    await this.requireAccess(u, kind, "write");
     if (kind === "challan") ownerId = input.recipientId;
     const data = await this.validate(u, kind, input, ownerId);
     if (kind === "dayplan")
@@ -492,8 +533,7 @@ export class Service {
     );
     const mod = moduleByKey[r.kind];
     assert(mod, 400, "Use the workflow action for this record");
-    if (mod.adminOnly || mod.readOnlyForRep)
-      assert(u.role === "admin", 403, "Administrator access required");
+    await this.requireAccess(u, r.kind, "write");
     const data = await this.validate(u, r.kind, input, r.ownerId);
     if (r.kind === "leave")
       await this.noOverlappingLeave(u, r.ownerId, data, id);
@@ -530,8 +570,7 @@ export class Service {
       409,
       "Operational records are retained for audit",
     );
-    if (moduleByKey[r.kind]?.readOnlyForRep || moduleByKey[r.kind]?.adminOnly)
-      assert(u.role === "admin", 403, "Administrator access required");
+    if (moduleByKey[r.kind]) await this.requireAccess(u, r.kind, "write");
     if (["expense", "sale", "rcpa"].includes(r.kind))
       await this.checkReportLock(u, r.ownerId, r.date);
     const refs = await this.store.all(

@@ -11,6 +11,7 @@ import {
   useResource,
 } from "./ui";
 import { SupportRequests } from "./insights";
+import { Permissions } from "./Permissions";
 const policyLabels: Record<string, string> = {
   gpsRadiusMeters: "Visit verification radius (m)",
   maxAccuracyMeters: "Maximum GPS uncertainty (m)",
@@ -60,6 +61,7 @@ export function Settings() {
         {[
           "policies",
           "roles",
+          ...(workspace.user.role === "admin" ? ["permissions"] : []),
           "integrations",
           "audit",
           ...(workspace.user.role === "admin" ? ["support"] : []),
@@ -167,6 +169,9 @@ export function Settings() {
             </p>
           </section>
         ))}
+      {tab === "permissions" && workspace.user.role === "admin" && (
+        <Permissions />
+      )}
       {tab === "integrations" && integrationsLoading && (
         <ContentSkeleton metrics={0} rows={4} />
       )}
