@@ -8,6 +8,7 @@ import {
   Route,
   Routes,
   useNavigate,
+  useLocation,
 } from "react-router-dom";
 import "@fontsource/manrope/400.css";
 import "@fontsource/manrope/500.css";
@@ -212,6 +213,7 @@ const nav = [
   ["/settings", "settings", "Settings"],
 ];
 function WorkspaceApp({ user, logout }: { user: User; logout: () => void }) {
+  const route = useLocation();
   const [workspace, setWorkspace] = useState<Workspace>(),
     [error, setError] = useState(""),
     [version, setVersion] = useState(0),
@@ -340,34 +342,36 @@ function WorkspaceApp({ user, logout }: { user: User; logout: () => void }) {
                 DEMO WORKSPACE · Fictional records for testing
               </div>
             )}
-            <Routes>
-              <Route path="/" element={<Overview />} />
-              <Route path="/team" element={<Team />} />
-              <Route path="/team/:id" element={<EmployeeProfile />} />
-              <Route path="/pob" element={<OrdersPage />} />
-              <Route path="/pob/:id" element={<OrderDetail />} />
-              <Route path="/exceptions" element={<Exceptions />} />
-              <Route path="/calls/:id" element={<Evidence />} />
-              <Route path="/exports" element={<ExportCenter />} />
-              <Route
-                path="/customers"
-                element={<RecordsPage key="customer" kind="customer" />}
-              />
-              {workspace.modules.map((m) => (
+            <div key={route.pathname} className="page-enter">
+              <Routes>
+                <Route path="/" element={<Overview />} />
+                <Route path="/team" element={<Team />} />
+                <Route path="/team/:id" element={<EmployeeProfile />} />
+                <Route path="/pob" element={<OrdersPage />} />
+                <Route path="/pob/:id" element={<OrderDetail />} />
+                <Route path="/exceptions" element={<Exceptions />} />
+                <Route path="/calls/:id" element={<Evidence />} />
+                <Route path="/exports" element={<ExportCenter />} />
                 <Route
-                  key={m.key}
-                  path={"/module/" + m.key}
-                  element={<RecordsPage key={m.key} kind={m.key} />}
+                  path="/customers"
+                  element={<RecordsPage key="customer" kind="customer" />}
                 />
-              ))}
-              <Route path="/approvals" element={<Approvals />} />
-              <Route path="/inventory" element={<Inventory />} />
-              <Route path="/reports" element={<Reports />} />
-              <Route path="/tracking" element={<TrackingPage />} />
-              <Route path="/activity" element={<Activity />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+                {workspace.modules.map((m) => (
+                  <Route
+                    key={m.key}
+                    path={"/module/" + m.key}
+                    element={<RecordsPage key={m.key} kind={m.key} />}
+                  />
+                ))}
+                <Route path="/approvals" element={<Approvals />} />
+                <Route path="/inventory" element={<Inventory />} />
+                <Route path="/reports" element={<Reports />} />
+                <Route path="/tracking" element={<TrackingPage />} />
+                <Route path="/activity" element={<Activity />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </div>
             <footer className="content-footer">
               <Link to="/activity">Calls & daily reports</Link>
               <Link to="/module/expense">Expenses</Link>
