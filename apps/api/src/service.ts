@@ -132,7 +132,20 @@ export class Service {
       const ids = await this.scope(u);
       rows = rows.filter((x) => ids.includes(x.id) || x.id === u.managerId);
     }
-    return rows.map((x) => ({ ...publicUser(x), version: x.version }));
+    // Head quarter names travel with each person, so screens never show raw ids.
+    const hq = new Map(
+      (
+        await this.store.all(
+          `SELECT id,${this.store.json("data", "name")} AS name FROM records WHERE tenant_id=? AND kind='territory' AND deleted=0`,
+          u.tenantId,
+        )
+      ).map((t) => [t.id, t.name]),
+    );
+    return rows.map((x) => ({
+      ...publicUser(x),
+      territoryName: hq.get(x.territory_id) ?? "",
+      version: x.version,
+    }));
   }
   async audit(u: User, action: string, id: string, details: unknown = {}) {
     await this.store.run(

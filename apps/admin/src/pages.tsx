@@ -537,7 +537,7 @@ export function Team() {
             {
               key: "territoryId",
               label: "HQ",
-              render: (r) => label(workspace, "territoryId", r.territoryId),
+              render: (r) => r.territoryName || "Unassigned",
             },
             {
               key: "active",

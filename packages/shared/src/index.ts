@@ -7,6 +7,7 @@ export type User = {
   role: Role;
   managerId: string | null;
   territoryId: string | null;
+  territoryName?: string;
   active: boolean;
   mustChangePassword: boolean;
 };
