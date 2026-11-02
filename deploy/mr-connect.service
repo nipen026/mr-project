@@ -1,0 +1,15 @@
+# /etc/systemd/system/mr-connect.service
+[Unit]
+Description=MR Connect API and admin panel
+After=network-online.target
+
+[Service]
+WorkingDirectory=/opt/mr-connect
+EnvironmentFile=/opt/mr-connect/.env
+ExecStart=/usr/bin/npm start
+Restart=on-failure
+User=mrconnect
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -35,3 +35,11 @@ Product descriptions in the demo are fictional. Replace them with approved compa
 Opaque 12-hour sessions are stored hashed on the server. Browser cookies are HTTP-only and same-site; mutations require an allowed Origin. Android tokens are encrypted using Android Keystore. Passwords use salted scrypt. Each request rechecks active account, role, tenant and hierarchy. Decisions cannot approve the actor’s own work. Attachments are type/size validated and require authorization. CSV exports neutralize formula prefixes. Client timestamps and mock flags are evidence, not proof against a compromised/rooted device.
 
 No formal penetration test or production deployment has been performed. Before launch, complete the client acceptance matrix, a restore drill, fleet load testing, external integration tests and the chosen distribution/privacy notices.
+
+## Quick deployment behind nginx
+
+Files in `deploy/`: `nginx.conf` (HTTPS reverse proxy), `mr-connect.service` (systemd) and `setup.sh` (installs everything on a fresh Ubuntu server). Point your domain's DNS at the server, then run `DOMAIN=mr.example.com bash deploy/setup.sh` as root from the repository folder, edit `/opt/mr-connect/.env` (set `DATABASE_URL`), and open `https://mr.example.com/api/health`.
+
+## Building the Android APK without Android Studio
+
+`.github/workflows/android-apk.yml` builds the debug APK on GitHub. Open the repository → Actions → "Build Android APK" → Run workflow, then download the `mr-connect-debug-apk` artifact, send `app-debug.apk` to the phone and install it. In the app, enter `https://mr.example.com` as the company server at sign-in.
