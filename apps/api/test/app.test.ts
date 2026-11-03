@@ -663,6 +663,30 @@ test("tracking accepts offline batches, ignores duplicates, rejects tampering an
     "ended",
   );
 });
+test("starting a shift on a new device closes the stale shift from the old device", async () => {
+  const old = await result(
+    "POST",
+    "/shifts/start",
+    { deviceId: "old-device-0001" },
+    "aman",
+  );
+  const same = await result(
+    "POST",
+    "/shifts/start",
+    { deviceId: "old-device-0001" },
+    "aman",
+  );
+  assert.equal(same.id, old.id);
+  const fresh = await result(
+    "POST",
+    "/shifts/start",
+    { deviceId: "new-device-0002" },
+    "aman",
+  );
+  assert.notEqual(fresh.id, old.id);
+  assert.equal(fresh.device_id, "new-device-0002");
+  await result("POST", "/shifts/" + fresh.id + "/end", {}, "aman");
+});
 test("DCR snapshots field activity and return opens it for correction", async () => {
   let r = await result(
     "POST",

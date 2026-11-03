@@ -489,6 +489,12 @@ class Repository(val context: Context, private val autoSchedule: Boolean = true)
                 count++
             } catch (e: ApiException) {
                 if (e.status >= 500 || e.status == 429) break
+                val path = op.getString("path")
+                // A rejected location or event must not block the queue (e.g. ending the shift)
+                if (e.status == 400 && (path.endsWith("/points") || path.endsWith("/events"))) {
+                    db.remove(op.getString("id"))
+                    continue
+                }
                 db.mark(
                     op.getString("id"),
                     if (e.status == 409) "conflict"

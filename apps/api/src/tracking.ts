@@ -36,12 +36,20 @@ export class Tracking {
       u.id,
     );
     if (prior) {
-      assert(
-        prior.device_id === deviceId,
-        409,
-        "A shift is active on another device. End it first",
+      if (prior.device_id === deviceId) return prior;
+      // The same user is starting on a new device (reinstall, cleared data or
+      // a new phone), so the old shift can never be ended from its device.
+      // Close it at its last known activity instead of blocking the user.
+      const last = await this.s.store.get(
+        "SELECT MAX(observed_at) AS time FROM points WHERE shift_id=?",
+        prior.id,
       );
-      return prior;
+      await this.s.store.run(
+        "UPDATE shifts SET ended_at=? WHERE id=?",
+        last?.time || prior.started_at,
+        prior.id,
+      );
+      await this.s.audit(u, "shift.ended", prior.id);
     }
     assert(
       !Number.isNaN(Date.parse(startedAt)) &&

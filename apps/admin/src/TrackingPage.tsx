@@ -253,7 +253,10 @@ export function TrackingPage() {
                     : "—",
               },
             ]}
-            onRow={(r) => setEmployee(r.userId)}
+            onRow={(r) => {
+              setEmployee(r.userId);
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
           />
         </section>
       )}

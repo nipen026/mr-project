@@ -107,7 +107,7 @@ class TrackingService : Service(), LocationListener {
             if (locations.allProviders.contains(LocationManager.GPS_PROVIDER))
                 locations.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    interval,
+                    minOf(interval, 5000L),
                     0f,
                     this,
                     Looper.getMainLooper(),
@@ -115,7 +115,7 @@ class TrackingService : Service(), LocationListener {
             if (locations.allProviders.contains(LocationManager.NETWORK_PROVIDER))
                 locations.requestLocationUpdates(
                     LocationManager.NETWORK_PROVIDER,
-                    interval,
+                    minOf(interval, 5000L),
                     0f,
                     this,
                     Looper.getMainLooper(),
@@ -160,7 +160,11 @@ class TrackingService : Service(), LocationListener {
     override fun onLocationChanged(location: Location) {
         if (repo.vault.shift.isEmpty() || location.accuracy <= 0) return
         val elapsed = android.os.SystemClock.elapsedRealtime()
-        if (elapsed - lastStored < interval / 2) return
+        if (elapsed - lastStored < interval) return
+        // Providers can hand back a cached fix from before the shift; the server rejects those
+        val started = repo.vault.shiftStarted
+        if (started.isNotEmpty() && location.time < Instant.parse(started).toEpochMilli() - 4000)
+            return
         lastStored = elapsed
         val battery =
             getSystemService(BatteryManager::class.java)
