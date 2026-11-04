@@ -1,0 +1,12 @@
+{
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build -w @mr/admin",
+  "outputDirectory": "apps/admin/dist",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://mr-project.onrender.com/api/:path*"
+    },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
+}
