@@ -41,6 +41,8 @@ class FieldViewModel(application: Application) : AndroidViewModel(application) {
     var pendingReports by mutableStateOf<JSONObject?>(null)
     var campaignDoctors by mutableStateOf<JSONObject?>(null)
     var campaignId by mutableStateOf("")
+    var tourGrid by mutableStateOf<JSONObject?>(null)
+    var expenseSuggestion by mutableStateOf<JSONObject?>(null)
     var addressCustomer by mutableStateOf<JSONObject?>(null)
     var addresses by mutableStateOf<JSONObject?>(null)
     var restrictedMessage by mutableStateOf("")
@@ -255,6 +257,25 @@ class FieldViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun startNonListedCall() {
+        val plan =
+            records("dayplan").find {
+                it.text("date") == localDate() && it.text("ownerId") == user.text("id")
+            }
+        if (plan == null) error = "Submit today’s day plan before recording a call"
+        else {
+            error = ""
+            selected = JSONObject().put("nonListed", true)
+            screen = "visit"
+        }
+    }
+
+    /** Date of the most recent saved call for a customer, or empty when never visited. */
+    fun lastVisited(customerId: String): String =
+        records("visit")
+            .filter { it.text("customerId") == customerId }
+            .maxOfOrNull { it.text("date") } ?: ""
+
     fun openAddresses(customer: JSONObject) {
         navigate("addresses")
         addressCustomer = customer
@@ -419,6 +440,8 @@ class FieldViewModel(application: Application) : AndroidViewModel(application) {
             if (base.trimEnd('/') != repo.vault.baseUrl) repo.vault.pinHash = ""
             repo.vault.baseUrl = base
             val session = repo.login(company, email, password)
+            message = ""
+            error = ""
             locked = false
             boot = repo.cached()
             if (session.getJSONObject("user").optBoolean("mustChangePassword")) {
@@ -594,6 +617,51 @@ class FieldViewModel(application: Application) : AndroidViewModel(application) {
             repo.sync()
             refresh()
             message = "Work shift ended. Tracking has stopped."
+        }
+    }
+
+    fun loadTourMonth(month: String) {
+        tourGrid = null
+        fetch { tourGrid = repo.get("/tour-plans/month?month=$month", "tour-month-$month") }
+    }
+
+    fun saveTourMonth(month: String, days: JSONArray, submit: Boolean) {
+        work {
+            repo.mutate(
+                "POST",
+                "/tour-plans/month",
+                JSONObject().put("month", month).put("days", days).put("submit", submit),
+            )
+            refresh()
+            tourGrid = repo.get("/tour-plans/month?month=$month", "tour-month-$month")
+            message = if (submit) "Tour plan submitted for approval" else "Tour plan saved as draft"
+        }
+    }
+
+    fun loadExpenseSuggestion(date: String) {
+        expenseSuggestion = null
+        fetch { expenseSuggestion = repo.get("/expenses/suggestion?date=$date", "expense-suggestion") }
+    }
+
+    fun autoExpenses(date: String) {
+        work {
+            repo.mutate("POST", "/expenses/auto", JSONObject().put("date", date))
+            refresh()
+            expenseSuggestion = null
+            message = "Draft TA/DA claims created. Review and submit them."
+        }
+    }
+
+    fun moveSales(record: JSONObject) {
+        work {
+            repo.mutate(
+                "POST",
+                "/record/${record.text("id")}/move-sales",
+                JSONObject().put("version", record.optInt("version")),
+            )
+            refresh()
+            screen = "module/stockstatement"
+            message = "Sales moved to next month"
         }
     }
 

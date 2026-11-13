@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -35,8 +36,11 @@ fun ModuleList(vm: FieldViewModel, kind: String) {
         return
     }
     if (kind == "dcr") Primary("Prepare daily report") { vm.navigate("dcr") }
+    if (kind == "tourplan") Primary("Plan the whole month") { vm.navigate("tour-month") }
+    if (kind == "expense") AutoExpenseCard(vm)
     if (mod != null && (!mod.optBoolean("readOnlyForRep") && !mod.optBoolean("adminOnly") || admin))
-        Primary("Add " + mod.text("singular").lowercase()) { vm.add(kind) }
+        if (kind == "tourplan") Secondary("Add " + mod.text("singular").lowercase()) { vm.add(kind) }
+        else Primary("Add " + mod.text("singular").lowercase()) { vm.add(kind) }
     Entry("Search records", q, { q = it })
     val rows = vm.records(kind).filter { it.toString().contains(q, true) }
     if (rows.isEmpty())
@@ -57,20 +61,42 @@ fun ModuleList(vm: FieldViewModel, kind: String) {
                 style = MaterialTheme.typography.titleMedium,
             )
             if (r.has("ownerName")) Text(r.text("ownerName"), color = Muted)
-            Text(
-                r.text("status") + if (r.optBoolean("queued")) " · Waiting to sync" else "",
-                color = Brand,
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StatusBadge(r.text("status"))
+                if (r.optBoolean("queued"))
+                    Text("Waiting to sync", color = Muted, style = MaterialTheme.typography.bodyMedium)
+            }
+            val heading =
+                r.text(
+                    "name",
+                    r.text("title", r.text("date", r.text("fromDate", mod?.text("singular") ?: kind))),
+                )
             (mod?.optJSONArray("columns") ?: JSONArray().put("visits").put("pob")).let { cols ->
-                (0 until cols.length()).take(3).forEach { i ->
-                    val key = cols.getString(i)
-                    if (r.has(key) && key != "name" && key != "status")
-                        Text(
-                            key.replace(Regex("([A-Z])"), " $1") + ": " + vm.names(r.text(key)),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Muted,
-                        )
-                }
+                (0 until cols.length())
+                    .map { cols.getString(it) }
+                    .filter { key ->
+                        r.has(key) &&
+                            key !in listOf("name", "status", "ownerName") &&
+                            vm.names(r.text(key)) != heading
+                    }
+                    .take(3)
+                    .forEach { key ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                humanize(key) + ":",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Subtle,
+                            )
+                            Text(
+                                vm.names(r.text(key)),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Ink,
+                            )
+                        }
+                    }
             }
             Secondary("View details") {
                 vm.selected = r
@@ -117,6 +143,27 @@ fun RecordEditor(vm: FieldViewModel) {
                             a?.let { (0 until it.length()).map { i -> it.getString(i) } }
                                 ?: emptyList(),
                         )
+                    }
+            }
+        }
+    val lineValues =
+        rememberSaveable(vm.formKind, initial?.text("id"), saver = StringMapSaver) {
+            mutableStateMapOf<String, String>().apply {
+                fields
+                    .filter { it.text("type") == "lines" }
+                    .forEach { f ->
+                        val a = initial?.optJSONArray(f.text("key")) ?: JSONArray()
+                        for (i in 0 until a.length()) {
+                            val row = a.getJSONObject(i)
+                            f.array("lineFields").forEach { lf ->
+                                val n = row.optInt(lf.text("key"))
+                                if (n > 0)
+                                    put(
+                                        f.text("key") + "|" + row.text("itemId") + "|" + lf.text("key"),
+                                        n.toString(),
+                                    )
+                            }
+                        }
                     }
             }
         }
@@ -203,6 +250,18 @@ fun RecordEditor(vm: FieldViewModel) {
                     f.optBoolean("required"),
                 )
             }
+            "lines" -> {
+                Text(f.text("label"), color = Muted)
+                vm.records(f.text("ref")).forEach { p ->
+                    FieldCard {
+                        Text(p.text("name"), style = MaterialTheme.typography.titleMedium)
+                        f.array("lineFields").forEach { lf ->
+                            val k = key + "|" + p.text("id") + "|" + lf.text("key")
+                            Entry(lf.text("label"), lineValues[k] ?: "", { lineValues[k] = it }, number = true)
+                        }
+                    }
+                }
+            }
             "multireference" -> {
                 Text(f.text("label"), color = Muted)
                 vm.records(f.text("ref")).forEach { r ->
@@ -261,6 +320,23 @@ fun RecordEditor(vm: FieldViewModel) {
                 }
                 if (f.text("type") == "multireference")
                     data.put(key, JSONArray(multiples[key] ?: emptyList<String>()))
+                else if (f.text("type") == "lines") {
+                    val rows = JSONArray()
+                    vm.records(f.text("ref")).forEach { p ->
+                        val row = JSONObject().put("itemId", p.text("id"))
+                        var any = false
+                        f.array("lineFields").forEach { lf ->
+                            val raw = lineValues[key + "|" + p.text("id") + "|" + lf.text("key")] ?: ""
+                            val n = if (raw.isBlank()) 0 else raw.toIntOrNull()
+                                ?: error(lf.text("label") + " must be a whole number")
+                            require(n >= 0) { lf.text("label") + " cannot be negative" }
+                            if (n > 0) any = true
+                            row.put(lf.text("key"), n)
+                        }
+                        if (any) rows.put(row)
+                    }
+                    data.put(key, rows)
+                }
                 else if (v.isNotBlank()) {
                     if (f.text("type") == "number") {
                         val n = v.toDoubleOrNull() ?: error(f.text("label") + " must be a number")
@@ -294,7 +370,14 @@ fun Detail(vm: FieldViewModel) {
         r.text("name", r.text("title", r.text("date", "Record detail"))),
         style = MaterialTheme.typography.titleLarge,
     )
-    Message(r.text("status") + if (r.optBoolean("queued")) " · Pending sync" else "")
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StatusBadge(r.text("status"))
+        if (r.optBoolean("queued"))
+            Text("Pending sync", color = Muted, style = MaterialTheme.typography.bodyMedium)
+    }
     val fields =
         mod?.array("fields")
             ?: r.keys()
@@ -329,7 +412,16 @@ fun Detail(vm: FieldViewModel) {
                             (0 until a.length()).forEach { i ->
                                 val x = a.opt(i)
                                 Text(
-                                    if (x is JSONObject)
+                                    if (x is JSONObject && x.has("closing"))
+                                        vm.names(x.text("itemId")) +
+                                            " · opening " + x.optInt("opening") +
+                                            " · receipts " + x.optInt("receipts") +
+                                            " · sales " + x.optInt("sales") +
+                                            (if (x.optInt("carriedIn") > 0)
+                                                " · moved in " + x.optInt("carriedIn")
+                                            else "") +
+                                            " · closing " + x.optInt("closing")
+                                    else if (x is JSONObject)
                                         vm.names(x.text("itemId")) + " × " + x.optInt("quantity")
                                     else vm.names(x.toString())
                                 )
@@ -376,6 +468,13 @@ fun Detail(vm: FieldViewModel) {
             r.text("status") in listOf("draft", "returned")
     )
         Primary("Submit for review", !vm.busy) { vm.submit(r) }
+    if (
+        kind == "stockstatement" &&
+            r.text("ownerId") == vm.user.text("id") &&
+            r.text("status") in listOf("draft", "returned") &&
+            !r.optBoolean("queued")
+    )
+        Secondary("Move sales to next month", !vm.busy) { vm.moveSales(r) }
     if (
         kind == "challan" && r.text("ownerId") == vm.user.text("id") && r.text("status") == "active"
     ) {
@@ -433,5 +532,151 @@ fun DailyReport(vm: FieldViewModel) {
     Primary("Prepare report for review", !vm.busy) { vm.saveDcr(date, remarks) }
     Message(
         "A submitted daily report locks its field activity. Your manager can return it for correction."
+    )
+}
+
+@Composable
+fun AutoExpenseCard(vm: FieldViewModel) {
+    var date by rememberSaveable { mutableStateOf(localDate()) }
+    FieldCard {
+        Text("Auto-calculate TA/DA", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Uses your day plan route and the company rates. Creates draft claims you can review.",
+            color = Muted,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Entry("Date (YYYY-MM-DD)", date, { date = it })
+        Secondary("Calculate", !vm.busy) { vm.loadExpenseSuggestion(date) }
+        vm.expenseSuggestion?.let { s ->
+            if (s.text("reason").isNotEmpty()) Message(s.text("reason"))
+            else {
+                val lines = s.array("lines")
+                lines.forEach { l ->
+                    Text(
+                        l.text("category") + ": " + rupees(l.optDouble("amount")) + "\n" + l.text("remarks"),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                Text("Total: " + rupees(s.optDouble("total")), color = Brand)
+                val claimedArray = s.optJSONArray("claimed") ?: JSONArray()
+                val claimed = (0 until claimedArray.length()).map { claimedArray.getString(it) }
+                if (lines.all { it.text("category") in claimed })
+                    Message("TA and DA are already claimed for this date.")
+                else Primary("Create draft claims", !vm.busy) { vm.autoExpenses(date) }
+            }
+        }
+    }
+}
+
+@Composable
+fun TourMonth(vm: FieldViewModel) {
+    val current = localDate().take(7)
+    val following = java.time.YearMonth.parse(current).plusMonths(1).toString()
+    var month by rememberSaveable { mutableStateOf(following) }
+    var workType by rememberSaveable { mutableStateOf("Field work") }
+    var defaultRoute by rememberSaveable { mutableStateOf("") }
+    val routes = vm.records("route").map { it.text("id") to it.text("name") }
+    val picks = rememberSaveable(month, saver = StringMapSaver) { mutableStateMapOf<String, String>() }
+    val types = rememberSaveable(month, saver = StringMapSaver) { mutableStateMapOf<String, String>() }
+    val partners = rememberSaveable(month, saver = StringMapSaver) { mutableStateMapOf<String, String>() }
+    val workTypes = listOf("Field work", "Joint work", "Meeting", "Training", "Administration")
+    val people =
+        vm.boot?.array("users")
+            ?.filter { it.optBoolean("active") && it.text("id") != vm.user.text("id") }
+            ?.map { it.text("id") to it.text("name") } ?: emptyList()
+    LaunchedEffect(month) { vm.loadTourMonth(month) }
+    val grid = vm.tourGrid
+    LaunchedEffect(grid) {
+        grid?.array("days")?.forEach { d ->
+            val date = d.text("date")
+            val rec = d.optJSONObject("record")
+            if (rec != null && picks[date] == null && rec.text("routeId").isNotEmpty())
+                picks[date] = rec.text("routeId")
+            if (rec != null && types[date] == null && rec.text("workType").isNotEmpty())
+                types[date] = rec.text("workType")
+            if (rec != null && partners[date] == null && rec.text("jointWith").isNotEmpty())
+                partners[date] = rec.text("jointWith")
+        }
+    }
+    Choice("Month", month, listOf(current to current, following to following), { month = it })
+    Choice(
+        "Default working type",
+        workType,
+        workTypes.map { it to it },
+        { workType = it },
+    )
+    Choice("Route for all working days", defaultRoute, routes, { defaultRoute = it })
+    if (grid == null) {
+        SkeletonCards(3)
+        return
+    }
+    val days = grid.array("days")
+    Secondary("Apply route and type to every open working day", defaultRoute.isNotEmpty()) {
+        days.forEach { d ->
+            val st = d.optJSONObject("record")?.text("status") ?: ""
+            if (!d.optBoolean("weeklyOff") && st !in listOf("pending", "approved")) {
+                picks[d.text("date")] = defaultRoute
+                types[d.text("date")] = workType
+            }
+        }
+    }
+    val names = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+    days.forEach { d ->
+        val date = d.text("date")
+        val rec = d.optJSONObject("record")
+        val locked = rec != null && rec.text("status") in listOf("pending", "approved")
+        FieldCard {
+            Text(date + " · " + names[d.optInt("weekday")], style = MaterialTheme.typography.titleMedium)
+            when {
+                d.optBoolean("weeklyOff") -> Text("Weekly off", color = Muted)
+                locked ->
+                    Text(
+                        rec!!.text("status") + " · " + vm.names(rec.text("routeId")),
+                        color = Brand,
+                    )
+                else -> {
+                    Choice(
+                        "Working type",
+                        types[date] ?: workType,
+                        workTypes.map { it to it },
+                        { types[date] = it },
+                    )
+                    Choice("Route", picks[date] ?: "", routes, { picks[date] = it })
+                    if ((types[date] ?: workType) == "Joint work")
+                        Choice(
+                            "Work with",
+                            partners[date] ?: "",
+                            people,
+                            { partners[date] = it },
+                        )
+                }
+            }
+        }
+    }
+    fun body(submit: Boolean): JSONArray {
+        val out = JSONArray()
+        days.forEach { d ->
+            val st = d.optJSONObject("record")?.text("status") ?: ""
+            val date = d.text("date")
+            val route = picks[date] ?: ""
+            if (!d.optBoolean("weeklyOff") && st !in listOf("pending", "approved") && route.isNotEmpty())
+                out.put(
+                    JSONObject()
+                        .put("date", date)
+                        .put("routeId", route)
+                        .put("workType", types[date] ?: workType)
+                        .apply {
+                            val w = partners[date] ?: ""
+                            if ((types[date] ?: workType) == "Joint work" && w.isNotEmpty())
+                                put("jointWith", w)
+                        }
+                )
+        }
+        return out
+    }
+    Secondary("Save draft", !vm.busy) { vm.saveTourMonth(month, body(false), false) }
+    Primary("Submit month for approval", !vm.busy) { vm.saveTourMonth(month, body(true), true) }
+    Message(
+        "Every working day needs a route before the month can be submitted. Weekly offs are added for you. Choose a different working type on any day, and a partner for joint work."
     )
 }

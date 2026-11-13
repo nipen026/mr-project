@@ -18,6 +18,7 @@ import {
   useResource,
 } from "./ui";
 import { RecordForm, RecordDetail } from "./forms";
+import { humanize } from "./nav";
 import { VisualReport, visualReports } from "./insights";
 import {
   moduleByKey,
@@ -71,7 +72,83 @@ export function Overview() {
           </>
         }
       />
-      <div className="filter-bar">
+      <div className="quick-actions" aria-label="Quick actions">
+        {[
+          [
+            "/approvals",
+            "shield-check",
+            "Review approvals",
+            d.attention.length ? d.attention.length + " waiting" : "All clear",
+          ],
+          ["/tracking", "map-pin", "Live tracking", "See where the team is"],
+          [
+            "/tour-calendar",
+            "calendar-days",
+            "Tour calendar",
+            "Plan and approve the month",
+          ],
+          [
+            "/customers",
+            "stethoscope",
+            "Add a customer",
+            "Doctor, chemist or stockist",
+          ],
+        ].map(([to, icon, title, sub]) => (
+          <Link key={to} className="quick" to={to}>
+            <span className="chip" aria-hidden="true">
+              <Icon name={icon} size={20} />
+            </span>
+            <span>
+              <strong>{title}</strong>
+              <small>{sub}</small>
+            </span>
+          </Link>
+        ))}
+      </div>
+      <section className="card no-padding">
+        <div className="card-heading">
+          <h3>
+            Needs your attention
+            {d.attention.length > 0 && (
+              <span className="count-pill">{d.attention.length}</span>
+            )}
+          </h3>
+          <Link className="button secondary" to="/approvals">
+            Open approvals
+          </Link>
+        </div>
+        <Table
+          caption="Needs your attention"
+          rows={d.attention}
+          onRow={setDetail}
+          columns={[
+            {
+              key: "kind",
+              label: "Item",
+              render: (r) =>
+                moduleByKey[r.kind]?.singular || "Daily call report",
+            },
+            { key: "ownerName", label: "Representative" },
+            {
+              key: "date",
+              label: "Date",
+              render: (r) => r.date || r.fromDate || r.createdAt.slice(0, 10),
+            },
+            {
+              key: "status",
+              label: "Status",
+              render: (r) => <Badge status={r.status} />,
+            },
+          ]}
+          empty={
+            <Empty
+              title="All caught up"
+              body="There are no submissions waiting for your attention."
+            />
+          }
+        />
+      </section>
+      <div className="filter-bar compact">
         <DateField
           label="Reporting date"
           value={date}
@@ -91,28 +168,31 @@ export function Overview() {
               </option>
             ))}
         </SelectField>
-        <span className="filter-hint">
-          <Icon name="list-filter" />
-          Your permitted team
-        </span>
       </div>
       <div className="metrics">
         <Metric
+          icon="users"
+          tone="info"
           label="Active representatives"
           value={`${d.active} / ${d.users}`}
           hint="Day plans recorded for this date"
         />
         <Metric
+          icon="stethoscope"
+          tone="ok"
           label="Doctor calls"
           value={d.doctorCalls}
           hint={`${d.totalCalls} total customer visits`}
         />
         <Metric
+          icon="file-text"
+          tone={d.users && d.dcrSubmitted < d.users ? "warn" : "ok"}
           label="DCR submission"
           value={`${d.users ? Math.round((d.dcrSubmitted / d.users) * 100) : 0}%`}
           hint={`${d.dcrSubmitted} of ${d.users} submitted`}
         />
         <Metric
+          icon="wallet"
           label="POB captured"
           value={money(d.pob)}
           hint={`${d.from} to ${d.to}`}
@@ -174,44 +254,39 @@ export function Overview() {
           </div>
         </section>
       </div>
-      <section className="card no-padding">
-        <div className="card-heading">
-          <h3>Needs your attention</h3>
-          <Link className="button secondary" to="/approvals">
-            All approvals
-          </Link>
-        </div>
-        <Table
-          caption="Needs your attention"
-          rows={d.attention}
-          onRow={setDetail}
-          columns={[
-            {
-              key: "kind",
-              label: "Item",
-              render: (r) =>
-                moduleByKey[r.kind]?.singular || "Daily call report",
-            },
-            { key: "ownerName", label: "Representative" },
-            {
-              key: "date",
-              label: "Date",
-              render: (r) => r.date || r.fromDate || r.createdAt.slice(0, 10),
-            },
-            {
-              key: "status",
-              label: "Status",
-              render: (r) => <Badge status={r.status} />,
-            },
-          ]}
-          empty={
-            <Empty
-              title="All caught up"
-              body="There are no submissions waiting for your attention."
-            />
-          }
-        />
-      </section>
+      {d.targets?.people > 0 && (
+        <section className="card">
+          <div className="card-heading">
+            <h3>Target vs achievement</h3>
+            <small>
+              {d.targets.month} · {d.targets.people} representatives
+            </small>
+          </div>
+          {[
+            ["Doctor calls", d.targets.doctorCalls, (n: number) => String(n)],
+            ["POB", d.targets.pob, money],
+          ].map(([name, t, fmt]: any) =>
+            t.target > 0 ? (
+              <div className="coverage" key={name}>
+                <strong>
+                  {fmt(t.actual)}
+                  <span> / {fmt(t.target)}</span>
+                </strong>
+                <p>
+                  {name} · {Math.round((t.actual / t.target) * 100)}% achieved
+                </p>
+                <div className="progress">
+                  <span
+                    style={{
+                      width: Math.min(100, (t.actual / t.target) * 100) + "%",
+                    }}
+                  />
+                </div>
+              </div>
+            ) : null,
+          )}
+        </section>
+      )}
       {detail && (
         <RecordDetail
           record={detail}
@@ -362,7 +437,7 @@ export function RecordsPage({ kind }: { kind: string }) {
           onRow={setDetail}
           columns={mod.columns.map((k) => ({
             key: k,
-            label: k.replace(/([A-Z])/g, " $1"),
+            label: humanize(k),
             render: (r) =>
               k === "status" ? (
                 <Badge status={r.status} />
@@ -401,7 +476,31 @@ export function RecordsPage({ kind }: { kind: string }) {
   );
 }
 export function Approvals() {
-  const { version, refresh } = useWorkspace();
+  const { version, refresh, notify } = useWorkspace();
+  const [busyId, setBusyId] = useState("");
+  const [failure, setFailure] = useState("");
+  async function approve(r: RecordData) {
+    setBusyId(r.id);
+    setFailure("");
+    try {
+      await api(
+        "/record/" + r.id + "/decision",
+        json(
+          "POST",
+          { version: r.version, action: "approve", reason: "" },
+          crypto.randomUUID(),
+        ),
+      );
+      notify(
+        "Approved " + (moduleByKey[r.kind]?.singular || "report").toLowerCase(),
+      );
+      await refresh();
+    } catch (e) {
+      setFailure((e as Error).message);
+    } finally {
+      setBusyId("");
+    }
+  }
   const { data, error, loading } = useResource(
     () => api("/approvals"),
     [version],
@@ -426,6 +525,7 @@ export function Approvals() {
         ))}
         <Link to="/exceptions">Visit exceptions</Link>
       </div>
+      {failure && <Notice tone="error">{failure}</Notice>}
       {loading ? (
         <ContentSkeleton metrics={0} />
       ) : error ? (
@@ -433,6 +533,7 @@ export function Approvals() {
       ) : (
         <section className="card no-padding">
           <Table
+            stack
             rows={data.items.filter(
               (r: RecordData) => !kind || r.kind === kind,
             )}
@@ -459,6 +560,26 @@ export function Approvals() {
                 key: "status",
                 label: "Status",
                 render: (r) => <Badge status={r.status} />,
+              },
+              {
+                key: "quick",
+                label: "Quick decision",
+                render: (r) => (
+                  <button
+                    type="button"
+                    className="button small"
+                    disabled={busyId === r.id}
+                    aria-label={`Approve ${
+                      moduleByKey[r.kind]?.singular || "report"
+                    } from ${r.ownerName}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void approve(r);
+                    }}
+                  >
+                    {busyId === r.id ? "Approving…" : "Approve"}
+                  </button>
+                ),
               },
             ]}
             empty={
@@ -769,6 +890,12 @@ export function Reports() {
     "expenses",
     "pob",
     "sales",
+    "rcpa",
+    "call-average",
+    "doctor-class",
+    "target-achievement",
+    "sample-gift-balance",
+    "sample-gift-distribution",
     "inventory",
     ...(workspace.user.role === "admin" ? ["audit"] : []),
   ];
@@ -839,7 +966,7 @@ function GenericReport({ type, query }: { type: string; query: string }) {
         rows={data.items}
         columns={Object.keys(data.items[0] || { result: "" }).map((k) => ({
           key: k,
-          label: k.replace(/([A-Z])/g, " $1"),
+          label: humanize(k),
         }))}
       />
     </section>

@@ -12,7 +12,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 
-/** Capitalizes the first letter of every word; emails, links and tokens with digits are left alone. */
+/** Title-casing helper, no longer applied to UI text: labels now keep sentence case, as in the admin app. */
 fun capitalizeWords(value: String): String =
     value.split(" ").joinToString(" ") { word ->
         if (word.isEmpty() || word.contains('@') || word.contains("://") || word.any { it.isDigit() }) word
@@ -39,7 +39,7 @@ fun Text(
     minLines: Int = 1,
     style: TextStyle = androidx.compose.material3.LocalTextStyle.current,
 ) = androidx.compose.material3.Text(
-    text = capitalizeWords(text),
+    text = text,
     modifier = modifier,
     color = color,
     fontSize = fontSize,
@@ -56,3 +56,10 @@ fun Text(
     minLines = minLines,
     style = style,
 )
+
+/** "routeId" becomes "Route", "doctorCalls" becomes "Doctor calls". */
+fun humanize(key: String): String =
+    key.removeSuffix("Id")
+        .replace(Regex("([a-z0-9])([A-Z])"), "$1 $2")
+        .lowercase()
+        .replaceFirstChar { it.uppercase() }

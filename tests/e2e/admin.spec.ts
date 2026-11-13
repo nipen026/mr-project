@@ -11,6 +11,11 @@ async function login(page: any, user = "admin") {
     page.getByRole("heading", { name: "A clear view of your field force" }),
   ).toBeVisible();
 }
+/** The form's dropdowns are custom comboboxes, not native selects. */
+async function choose(page: any, label: string, option: string) {
+  await page.getByLabel(label, { exact: true }).click();
+  await page.getByRole("option", { name: option, exact: true }).click();
+}
 test("sign-in, customer CRUD, validation, search and persistence", async ({
   page,
 }) => {
@@ -25,15 +30,9 @@ test("sign-in, customer CRUD, validation, search and persistence", async ({
   await page
     .getByLabel("Customer name *", { exact: true })
     .fill("Dr. Browser Test");
-  await page
-    .getByLabel("Customer type *", { exact: true })
-    .selectOption("Doctor");
-  await page
-    .getByLabel("Assigned representative *", { exact: true })
-    .selectOption({ label: "Aman Sharma" });
-  await page
-    .getByLabel("Route *", { exact: true })
-    .selectOption({ label: "Delhi HQ · Local route" });
+  await choose(page, "Customer type *", "Doctor");
+  await choose(page, "Assigned representative *", "Aman Sharma");
+  await choose(page, "Route *", "Delhi HQ · Local route");
   await page.getByLabel("Area *", { exact: true }).fill("Test area");
   await page
     .getByLabel("Clinic / business address *", { exact: true })
@@ -135,15 +134,13 @@ test("customer import validates before writing and previews CSV", async ({
   await login(page);
   await page.goto("/customers");
   await page.getByRole("button", { name: "Import customers" }).click();
-  await page
-    .getByLabel("Customer CSV")
-    .setInputFiles({
-      name: "customers.csv",
-      mimeType: "text/csv",
-      buffer: Buffer.from(
-        "name,type,assignedTo,routeId,area,clinicAddress\nInvalid Doctor,Doctor,aman,unknown,Delhi,Test clinic",
-      ),
-    });
+  await page.getByLabel("Customer CSV").setInputFiles({
+    name: "customers.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from(
+      "name,type,assignedTo,routeId,area,clinicAddress\nInvalid Doctor,Doctor,aman,unknown,Delhi,Test clinic",
+    ),
+  });
   await expect(page.getByRole("dialog")).toContainText("1 customers ready");
   await page.getByRole("button", { name: "Validate & import" }).click();
   await expect(page.getByRole("alert")).toContainText("Row 2");
@@ -187,4 +184,17 @@ test("session expiry exits to sign-in and server errors are visible", async ({
   await page.getByLabel("Password *", { exact: true }).fill("invalid");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("incorrect");
+});
+test("manager can approve a submission in one click from the inbox", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("link", { name: "Approvals", exact: true }).click();
+  const quick = page.getByRole("button", {
+    name: "Approve Leave request from Aman Sharma",
+  });
+  await expect(quick).toBeVisible();
+  await quick.click();
+  await expect(page.getByRole("status")).toContainText("Approved");
+  await expect(quick).toHaveCount(0);
 });

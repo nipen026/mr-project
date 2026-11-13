@@ -353,7 +353,11 @@ export class Service {
           400,
           `${field.label} is outside the allowed range`,
         );
-        if (["quantity", "frequency"].includes(field.key))
+        if (
+          ["quantity", "frequency", "doctorCalls", "chemistCalls"].includes(
+            field.key,
+          )
+        )
           assert(
             Number.isInteger(v),
             400,
@@ -365,6 +369,39 @@ export class Service {
           )
         )
           v = Math.round(v * 100) / 100;
+      } else if (field.type === "lines") {
+        assert(
+          Array.isArray(v) && v.length <= 300,
+          400,
+          `Invalid ${field.label}`,
+        );
+        const seen = new Set<string>();
+        v = await Promise.all(
+          v.map(async (row: any) => {
+            assert(
+              row && typeof row.itemId === "string" && !seen.has(row.itemId),
+              400,
+              `Invalid ${field.label}`,
+            );
+            seen.add(row.itemId);
+            assert(
+              (await this.record(u, row.itemId)).kind === field.ref,
+              400,
+              `Invalid ${field.label}`,
+            );
+            const line: Record<string, any> = { itemId: row.itemId };
+            for (const lf of field.lineFields ?? []) {
+              const n = row[lf.key] ?? 0;
+              assert(
+                Number.isInteger(n) && n >= 0 && n <= 100000000,
+                400,
+                `${lf.label} must be a whole number of at least zero`,
+              );
+              line[lf.key] = n;
+            }
+            return line;
+          }),
+        );
       } else if (field.type === "multireference") {
         assert(
           Array.isArray(v) &&
@@ -402,7 +439,7 @@ export class Service {
               u.tenantId,
             );
             assert(ur, 400, `Invalid ${field.label}`);
-            if (field.key === "assignedTo" || field.key === "recipientId")
+            if (["assignedTo", "recipientId", "employeeId"].includes(field.key))
               assert(
                 (await this.scope(u)).includes(v),
                 403,
@@ -427,6 +464,39 @@ export class Service {
         }
       }
       out[field.key] = v;
+    }
+    if (kind === "tourplan")
+      assert(
+        out.workType === "Weekly off" || out.routeId,
+        400,
+        "Route is required",
+      );
+    if (kind === "target") {
+      assert(u.role !== "rep", 403, "Only managers can set targets");
+      assert(
+        /^\d{4}-(0[1-9]|1[0-2])$/.test(out.month),
+        400,
+        "Month must look like 2026-04",
+      );
+      assert(
+        ["doctorCalls", "chemistCalls", "pobTarget", "salesTarget"].some(
+          (k) => out[k] > 0,
+        ),
+        400,
+        "Enter at least one target",
+      );
+    }
+    if (kind === "stockstatement") {
+      assert(
+        /^\d{4}-(0[1-9]|1[0-2])$/.test(out.month),
+        400,
+        "Month must look like 2026-04",
+      );
+      assert(
+        out.month <= today().slice(0, 7),
+        400,
+        "A future month cannot be reported",
+      );
     }
     if (kind === "route")
       assert(
@@ -472,6 +542,7 @@ export class Service {
     }
     if (
       kind === "expense" &&
+      !(input.auto === true && ["TA", "DA"].includes(out.category)) &&
       out.amount >= (await this.policies(u)).receiptRequiredAbove
     )
       assert(
@@ -479,12 +550,40 @@ export class Service {
         400,
         "A receipt is required above the configured threshold",
       );
-    if (kind === "rcpa")
+    if (kind === "rcpa") {
       assert(
         (await this.record(u, out.customerId)).type === "Chemist",
         400,
         "RCPA needs a chemist",
       );
+      if (out.doctorId)
+        assert(
+          (await this.record(u, out.doctorId)).type === "Doctor",
+          400,
+          "Prescriber must be a doctor",
+        );
+      if (out.rate === undefined)
+        out.rate = (await this.record(u, out.productId)).price;
+      if (out.moreCompetitors) {
+        const rows = out.moreCompetitors
+          .split("\n")
+          .filter((x: string) => x.trim());
+        assert(rows.length <= 5, 400, "At most five more competitor items");
+        for (const row of rows) {
+          const [brand, rate, units, ...rest] = row
+            .split(",")
+            .map((x: string) => x.trim());
+          assert(
+            brand &&
+              rest.length === 0 &&
+              /^\d+(\.\d+)?$/.test(rate ?? "") &&
+              /^\d+$/.test(units ?? ""),
+            400,
+            "Competitor lines must be: brand, rate, units",
+          );
+        }
+      }
+    }
     if (kind === "sponsorship")
       assert(
         (await this.record(u, out.customerId)).type === "Doctor",
@@ -501,11 +600,176 @@ export class Service {
     }
     return out;
   }
+  /** Derives closing stock and totals; carried maps item → sales moved in from last month. */
+  finishStatement(out: any, carried: Record<string, number>) {
+    const lines: any[] = out.lines ?? [];
+    for (const id of Object.keys(carried))
+      if (!lines.some((l) => l.itemId === id))
+        lines.push({ itemId: id, opening: 0, receipts: 0, sales: 0 });
+    let totalSales = 0,
+      totalClosing = 0;
+    for (const l of lines) {
+      const moved = carried[l.itemId] ?? 0;
+      if (moved) l.carriedIn = moved;
+      else delete l.carriedIn;
+      l.closing = l.opening + l.receipts - l.sales - moved;
+      assert(l.closing >= 0, 400, "Closing stock cannot be negative");
+      totalSales += l.sales + moved;
+      totalClosing += l.closing;
+    }
+    out.lines = lines;
+    out.totalSales = totalSales;
+    out.totalClosing = totalClosing;
+    if (out.carried !== undefined || Object.keys(carried).length)
+      out.carried = carried;
+    assert(
+      out.zeroSale === "Yes" ? totalSales === 0 : totalSales > 0,
+      400,
+      out.zeroSale === "Yes"
+        ? "Zero sale statements cannot contain sales"
+        : "Enter sales, or mark the month as zero sale",
+    );
+  }
+  async noDuplicateStatement(
+    u: User,
+    ownerId: string,
+    month: string,
+    exclude = "",
+  ) {
+    const dup = (await this.list(u, "stockstatement")).some(
+      (r) =>
+        r.id !== exclude &&
+        r.ownerId === ownerId &&
+        r.month === month &&
+        r.status !== "rejected",
+    );
+    assert(!dup, 409, "A statement already exists for this month");
+  }
+  /** Moves this month's sales into next month's statement (draft or returned only). */
+  async moveSalesToNextMonth(u: User, id: string, version: number) {
+    const r = await this.record(u, id);
+    assert(r.kind === "stockstatement", 400, "Not a stock statement");
+    assert(r.ownerId === u.id, 403, "Only the owner can move sales");
+    assert(
+      r.version === version,
+      409,
+      "Record changed. Reload first",
+      "VERSION_CONFLICT",
+    );
+    assert(
+      ["draft", "returned"].includes(r.status),
+      409,
+      "Only draft or returned statements can be changed",
+    );
+    const lines: any[] = (r.lines ?? []).filter((l: any) => l.sales > 0);
+    assert(lines.length > 0, 400, "There are no sales to move");
+    const [y, m] = r.month.split("-").map(Number);
+    const next = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7);
+    assert(
+      next <= new Date(Date.now() + 86400000 * 31).toISOString().slice(0, 7),
+      400,
+      "Sales can only be moved to the following month",
+    );
+    const strip = (x: any) => {
+      const {
+        id: _i,
+        kind: _k,
+        ownerId: _o,
+        ownerName: _n,
+        status: _s,
+        version: _v,
+        createdAt: _c,
+        updatedAt: _u,
+        decisions: _d,
+        ...data
+      } = x;
+      return data;
+    };
+    const moved: Record<string, number> = {};
+    const cur = strip(r);
+    cur.lines = (cur.lines as any[]).map((l) => {
+      if (l.sales > 0) moved[l.itemId] = l.sales;
+      return {
+        itemId: l.itemId,
+        opening: l.opening,
+        receipts: l.receipts,
+        sales: 0,
+      };
+    });
+    const carriedNow: Record<string, number> = { ...(cur.carried ?? {}) };
+    cur.zeroSale = Object.keys(carriedNow).length ? "No" : "Yes";
+    this.finishStatement(cur, carriedNow);
+    const existing = (await this.list(u, "stockstatement")).find(
+      (x) => x.ownerId === u.id && x.month === next && x.status !== "rejected",
+    );
+    let nextId: string;
+    if (existing) {
+      assert(
+        ["draft", "returned"].includes(existing.status),
+        409,
+        "Next month's statement is already submitted",
+      );
+      const nx = strip(existing);
+      const carried = { ...(nx.carried ?? {}) };
+      for (const [item, q] of Object.entries(moved))
+        carried[item] = (carried[item] ?? 0) + q;
+      nx.lines = (nx.lines as any[]).map((l) => ({
+        itemId: l.itemId,
+        opening: l.opening,
+        receipts: l.receipts,
+        sales: l.sales,
+      }));
+      nx.zeroSale = "No";
+      for (const item of Object.keys(moved))
+        if (!nx.lines.some((l: any) => l.itemId === item))
+          nx.lines.push({
+            itemId: item,
+            opening:
+              cur.lines.find((l: any) => l.itemId === item)?.closing ?? 0,
+            receipts: 0,
+            sales: 0,
+          });
+      this.finishStatement(nx, carried);
+      await this.store.run(
+        "UPDATE records SET data=?,version=version+1,updated_at=? WHERE id=?",
+        JSON.stringify(nx),
+        now(),
+        existing.id,
+      );
+      nextId = existing.id;
+    } else {
+      const nx: any = {
+        month: next,
+        zeroSale: "No",
+        lines: cur.lines.map((l: any) => ({
+          itemId: l.itemId,
+          opening: l.closing,
+          receipts: 0,
+          sales: 0,
+        })),
+      };
+      this.finishStatement(nx, moved);
+      nextId = (await this.insert(u, "stockstatement", nx, u.id, "draft")).id;
+    }
+    await this.store.run(
+      "UPDATE records SET data=?,version=version+1,updated_at=? WHERE id=?",
+      JSON.stringify(cur),
+      now(),
+      id,
+    );
+    await this.audit(u, "stockstatement.sales_moved", id, { to: next, nextId });
+    return {
+      statement: await this.record(u, id),
+      next: await this.record(u, nextId),
+    };
+  }
   async create(u: User, kind: string, input: any, ownerId = u.id) {
     const mod = moduleByKey[kind];
     assert(mod, 404, "Unknown module");
     await this.requireAccess(u, kind, "write");
+    if (input && typeof input === "object") delete input.auto;
     if (kind === "challan") ownerId = input.recipientId;
+    if (kind === "target") ownerId = input.employeeId;
     const data = await this.validate(u, kind, input, ownerId);
     if (kind === "dayplan")
       assert(
@@ -516,6 +780,16 @@ export class Service {
         "Day plan is outside the reporting window",
       );
     if (kind === "leave") await this.noOverlappingLeave(u, ownerId, data);
+    if (kind === "target") {
+      const dup = (await this.list(u, "target")).some(
+        (r) => r.employeeId === data.employeeId && r.month === data.month,
+      );
+      assert(!dup, 409, "A target already exists for this person and month");
+    }
+    if (kind === "stockstatement") {
+      await this.noDuplicateStatement(u, ownerId, data.month);
+      this.finishStatement(data, {});
+    }
     return await this.insert(
       u,
       kind,
@@ -547,9 +821,31 @@ export class Service {
     const mod = moduleByKey[r.kind];
     assert(mod, 400, "Use the workflow action for this record");
     await this.requireAccess(u, r.kind, "write");
+    if (input && typeof input === "object") delete input.auto;
     const data = await this.validate(u, r.kind, input, r.ownerId);
+    if (
+      r.kind === "expense" &&
+      r.auto === true &&
+      r.amount === data.amount &&
+      r.category === data.category
+    )
+      data.auto = true;
     if (r.kind === "leave")
       await this.noOverlappingLeave(u, r.ownerId, data, id);
+    if (r.kind === "target")
+      assert(
+        data.employeeId === r.ownerId && data.month === r.month,
+        400,
+        "Create a new target to change the person or month",
+      );
+    if (r.kind === "stockstatement") {
+      assert(
+        r.month === data.month,
+        400,
+        "The month of a statement cannot change",
+      );
+      this.finishStatement(data, r.carried ?? {});
+    }
     if (r.kind === "dayplan") {
       assert(
         r.date === today() && data.date === r.date,
@@ -638,6 +934,7 @@ export class Service {
     );
     if (r.kind === "leave") await this.noOverlappingLeave(u, r.ownerId, r, id);
     if (r.kind === "expense") await this.validate(u, "expense", r, r.ownerId);
+    if (r.kind === "tourplan") await this.validate(u, "tourplan", r, r.ownerId);
     if (r.kind === "dcr") {
       const visits = await this.list(u, "visit", {
         ownerId: r.ownerId,
@@ -747,7 +1044,23 @@ export class Service {
   async visit(u: User, input: any) {
     const parsed = z
       .object({
-        customerId: z.string(),
+        customerId: z.string().optional(),
+        nonListed: z
+          .object({
+            name: z.string().trim().min(2).max(120),
+            type: z.enum([
+              "Doctor",
+              "Chemist",
+              "Hospital",
+              "Stockist",
+              "Dietitian",
+              "Other",
+            ]),
+            area: z.string().trim().max(120).optional(),
+          })
+          .optional(),
+        reminderId: z.string().optional(),
+        attachmentId: z.string().optional(),
         planId: z.string(),
         visitedAt: z.iso.datetime(),
         remarks: z.string().trim().min(1).max(5000),
@@ -796,12 +1109,40 @@ export class Service {
       })
       .strict()
       .parse(input);
-    const customer = await this.record(u, parsed.customerId);
     assert(
-      customer.kind === "customer" && customer.assignedTo === u.id,
-      403,
-      "This customer is not assigned to you",
+      !!parsed.customerId !== !!parsed.nonListed,
+      400,
+      "Choose a listed customer or enter a non-listed call",
     );
+    let customer: any = null;
+    if (parsed.customerId) {
+      customer = await this.record(u, parsed.customerId);
+      assert(
+        customer.kind === "customer" && customer.assignedTo === u.id,
+        403,
+        "This customer is not assigned to you",
+      );
+    }
+    if (parsed.attachmentId) {
+      const a = await this.store.get(
+        "SELECT id FROM attachments WHERE id=? AND tenant_id=? AND owner_id=?",
+        parsed.attachmentId,
+        u.tenantId,
+        u.id,
+      );
+      assert(a, 400, "Call attachment was not found");
+    }
+    let reminder: any = null;
+    if (parsed.reminderId) {
+      reminder = await this.record(u, parsed.reminderId);
+      assert(
+        reminder.kind === "reminder" &&
+          reminder.ownerId === u.id &&
+          (!parsed.customerId || reminder.customerId === parsed.customerId),
+        400,
+        "Reminder does not belong to this call",
+      );
+    }
     const plan = await this.record(u, parsed.planId);
     assert(
       plan.kind === "dayplan" && plan.ownerId === u.id,
@@ -846,7 +1187,7 @@ export class Service {
     const p = await this.policies(u),
       loc = parsed.location;
     let distance: number | null = null;
-    if (loc && customer.latitude !== undefined)
+    if (loc && customer && customer.latitude !== undefined)
       distance = Math.round(
         distanceMeters(
           loc.latitude,
@@ -861,8 +1202,7 @@ export class Service {
       loc.accuracy <= p.maxAccuracyMeters &&
       Math.abs(Date.parse(loc.observedAt) - Date.parse(parsed.visitedAt)) <=
         120000 &&
-      distance !== null &&
-      distance <= p.gpsRadiusMeters;
+      (customer ? distance !== null && distance <= p.gpsRadiusMeters : true);
     if (!verified)
       assert(
         (parsed.exceptionReason?.trim().length ?? 0) >= 5,
@@ -884,8 +1224,16 @@ export class Service {
       {
         ...parsed,
         date: visitDate,
-        customerName: customer.name,
-        customerType: customer.type,
+        callType: parsed.nonListed
+          ? "Non-listed"
+          : reminder
+            ? "Reminder"
+            : "Regular",
+        customerName: customer ? customer.name : parsed.nonListed!.name,
+        customerType: customer ? customer.type : parsed.nonListed!.type,
+        customerClass: customer?.class ?? null,
+        customerArea: customer ? customer.area : (parsed.nonListed!.area ?? ""),
+        jointWith: plan.jointWith ?? null,
         routeId: plan.routeId,
         verified,
         distanceMeters: distance,
@@ -921,6 +1269,13 @@ export class Service {
         await this.stock(u, u.id, type, line.itemId, -line.quantity, r.id);
       }
     }
+    if (reminder && reminder.completed !== "Yes")
+      await this.update(
+        u,
+        reminder.id,
+        { ...reminder, completed: "Yes" },
+        reminder.version,
+      );
     return r;
   }
   async stock(
@@ -1004,6 +1359,230 @@ export class Service {
     await this.audit(u, "challan.acknowledged", id, { receivedQty });
     return await this.record(u, id);
   }
+  /** TA/DA the company policy would pay for a day, from the day plan's route. */
+  async expenseSuggestion(u: User, date: string, ownerId = u.id) {
+    day(date);
+    assert(
+      (await this.scope(u)).includes(ownerId),
+      403,
+      "Employee is outside your team",
+    );
+    assert(date <= today(), 400, "Future expenses are not allowed");
+    const p = await this.policies(u);
+    const plan = (await this.list(u, "dayplan", { date, ownerId })).find(
+      (x) => x.ownerId === ownerId,
+    );
+    const visits = (await this.list(u, "visit", { date, ownerId })).filter(
+      (x) => x.ownerId === ownerId,
+    );
+    const claimed = (await this.list(u, "expense", { date, ownerId }))
+      .filter((x) => x.ownerId === ownerId && x.status !== "rejected")
+      .map((x) => x.category);
+    const owner = (await this.users(u)).find((x) => x.id === ownerId);
+    const out: any = {
+      date,
+      ownerId,
+      ownerName: owner?.name ?? "",
+      lines: [] as any[],
+      claimed,
+      reason: "",
+    };
+    if (!plan) out.reason = "No day plan for this date";
+    else if (!["Field work", "Joint work"].includes(plan.workType))
+      out.reason = "Allowances are paid for field or joint work days only";
+    else if (!visits.length) out.reason = "Record at least one call that day";
+    else if (!plan.routeId) out.reason = "The day plan has no route";
+    if (out.reason) return out;
+    const route = await this.record(u, plan!.routeId);
+    out.route = route.name;
+    const rate =
+      route.allowanceType === "Outstation"
+        ? p.outstationDA
+        : route.allowanceType === "Ex-station"
+          ? p.exStationDA
+          : p.localDA;
+    const extra = route.additionalAllowance ?? 0;
+    const da = Math.round((rate + extra) * 100) / 100;
+    out.lines.push({
+      category: "DA",
+      amount: da,
+      distanceKm: null,
+      remarks:
+        `Auto DA · ${route.allowanceType} ₹${rate}` +
+        (extra ? ` + route allowance ₹${extra}` : "") +
+        ` · route ${route.name}`,
+    });
+    const base = route.distanceKm ?? 0;
+    const oneWay = route.tripType === "One way";
+    const km = oneWay ? base * 2 : base;
+    const ta = Math.round(km * p.taPerKm * 100) / 100;
+    if (ta > 0)
+      out.lines.push({
+        category: "TA",
+        amount: ta,
+        distanceKm: km,
+        remarks: `Auto TA · ${oneWay ? `${base} km one way × 2 = ` : ""}${km} km × ₹${p.taPerKm} · route ${route.name}`,
+      });
+    out.lines = out.lines.filter((l: any) => l.amount > 0);
+    out.total =
+      Math.round(
+        out.lines.reduce((a: number, l: any) => a + l.amount, 0) * 100,
+      ) / 100;
+    return out;
+  }
+  /** Creates draft TA/DA claims from the suggestion; categories already claimed are skipped. */
+  async autoExpenses(u: User, date: string) {
+    const sug = await this.expenseSuggestion(u, date);
+    assert(!sug.reason, 400, sug.reason);
+    const p = await this.policies(u);
+    assert(
+      Date.now() - Date.parse(date + "T00:00:00Z") <=
+        (p.reportDeadlineDays + 1) * 86400000,
+      400,
+      "Date is outside the reporting window",
+    );
+    await this.checkReportLock(u, u.id, date);
+    const fresh = sug.lines.filter(
+      (l: any) => !sug.claimed.includes(l.category),
+    );
+    assert(
+      fresh.length > 0,
+      409,
+      "TA and DA are already claimed for this date",
+    );
+    const made = [];
+    for (const l of fresh)
+      made.push(
+        await this.insert(
+          u,
+          "expense",
+          {
+            date,
+            category: l.category,
+            amount: l.amount,
+            ...(l.distanceKm ? { distanceKm: l.distanceKm } : {}),
+            remarks: l.remarks,
+            auto: true,
+          },
+          u.id,
+          "draft",
+        ),
+      );
+    await this.audit(u, "expense.auto_calculated", made[0].id, { date });
+    return {
+      items: made,
+      total: fresh.reduce((a: number, l: any) => a + l.amount, 0),
+    };
+  }
+  /** The month as a day-by-day grid with weekly offs filled in from policy. */
+  async tourMonth(u: User, month: string, ownerId = u.id) {
+    assert(
+      (await this.scope(u)).includes(ownerId),
+      403,
+      "Employee is outside your team",
+    );
+    assert(
+      /^\d{4}-(0[1-9]|1[0-2])$/.test(month),
+      400,
+      "Month must look like 2026-04",
+    );
+    const p = await this.policies(u);
+    const [y, m] = month.split("-").map(Number);
+    const count = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const existing = (await this.list(u, "tourplan", { ownerId })).filter(
+      (x) => x.ownerId === ownerId && x.date.startsWith(month),
+    );
+    const days = Array.from({ length: count }, (_, i) => {
+      const date = `${month}-${String(i + 1).padStart(2, "0")}`;
+      const dow = new Date(date + "T00:00:00Z").getUTCDay();
+      const rec = existing.find((x) => x.date === date);
+      return {
+        date,
+        weekday: dow,
+        weeklyOff: dow === p.weeklyOffDay,
+        record: rec ?? null,
+      };
+    });
+    return { month, weeklyOffDay: p.weeklyOffDay, days };
+  }
+  /** Saves every day of a month in one validated step; optionally submits them all. */
+  async saveTourMonth(
+    u: User,
+    month: string,
+    input: {
+      date: string;
+      routeId?: string;
+      workType: string;
+      jointWith?: string;
+      notes?: string;
+    }[],
+    submit: boolean,
+  ) {
+    const grid = await this.tourMonth(u, month);
+    assert(
+      month >= today().slice(0, 7),
+      400,
+      "Tour plans cannot be created for past months",
+    );
+    const given = new Map(input.map((d) => [d.date, d]));
+    for (const d of input)
+      assert(
+        grid.days.some((x) => x.date === d.date) && given.size === input.length,
+        400,
+        "Days must be unique dates inside the month",
+      );
+    const prepared: { date: string; data: any; existing: any }[] = [];
+    for (const d of grid.days) {
+      const entry = given.get(d.date);
+      let raw: any;
+      if (d.weeklyOff && !entry) raw = { date: d.date, workType: "Weekly off" };
+      else if (!entry) {
+        assert(
+          !submit,
+          400,
+          `Add a plan for ${d.date} before submitting the month`,
+        );
+        continue;
+      } else raw = { ...entry };
+      if (d.weeklyOff) raw = { date: d.date, workType: "Weekly off" };
+      raw.date = d.date;
+      for (const k of Object.keys(raw))
+        if (raw[k] === undefined || raw[k] === "") delete raw[k];
+      const data = await this.validate(u, "tourplan", raw, u.id);
+      assert(
+        !d.record || ["draft", "returned"].includes(d.record.status),
+        409,
+        `${d.date} is already submitted and cannot be changed`,
+      );
+      prepared.push({ date: d.date, data, existing: d.record });
+    }
+    const saved: RecordData[] = [];
+    for (const x of prepared) {
+      let rec: RecordData;
+      if (x.existing) {
+        await this.store.run(
+          "UPDATE records SET data=?,version=version+1,updated_at=? WHERE id=?",
+          JSON.stringify(x.data),
+          now(),
+          x.existing.id,
+        );
+        rec = await this.record(u, x.existing.id);
+      } else rec = await this.insert(u, "tourplan", x.data, u.id, "draft");
+      saved.push(rec);
+    }
+    if (submit)
+      for (let i = 0; i < saved.length; i++)
+        saved[i] = await this.submit(u, saved[i].id, saved[i].version);
+    await this.audit(
+      u,
+      submit ? "tourplan.month_submitted" : "tourplan.month_saved",
+      month,
+      {
+        days: saved.length,
+      },
+    );
+    return { month, items: saved, submitted: submit };
+  }
   async dcr(u: User, date: string, remarks: string) {
     day(date);
     assert(date <= today(), 400, "Future reports are not allowed");
@@ -1085,10 +1664,35 @@ export class Service {
       to: date,
       ownerId: query.ownerId,
     });
+    const month = date.slice(0, 7);
+    const monthTargets = (await this.can(u, "target", "read"))
+      ? (await this.list(u, "target", { ownerId: query.ownerId })).filter(
+          (t) => t.month === month,
+        )
+      : [];
+    const targetSummary = {
+      month,
+      people: monthTargets.length,
+      doctorCalls: {
+        target: monthTargets.reduce((a, t) => a + (t.doctorCalls ?? 0), 0),
+        actual: monthVisits.filter(
+          (v) =>
+            v.customerType === "Doctor" &&
+            monthTargets.some((t) => t.employeeId === v.ownerId),
+        ).length,
+      },
+      pob: {
+        target: monthTargets.reduce((a, t) => a + (t.pobTarget ?? 0), 0),
+        actual: monthVisits
+          .filter((v) => monthTargets.some((t) => t.employeeId === v.ownerId))
+          .reduce((a, v) => a + (v.orderTotal || 0), 0),
+      },
+    };
     return {
       date,
       from,
       to,
+      targets: targetSummary,
       users: users.length,
       active: plans.length,
       doctorCalls: dayVisits.filter((x) => x.customerType === "Doctor").length,
@@ -1108,7 +1712,7 @@ export class Service {
       verified: dayVisits.filter((x) => x.verified).length,
       monthlyCoverage: new Set(
         monthVisits
-          .filter((x) => x.customerType === "Doctor")
+          .filter((x) => x.customerType === "Doctor" && x.customerId)
           .map((x) => x.customerId),
       ).size,
       customerCount: customer.filter((x) => x.type === "Doctor").length,

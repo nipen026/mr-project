@@ -544,6 +544,62 @@ export async function buildApp(
         ),
     ),
   );
+  app.post("/api/tour-plans/month", async (r) =>
+    mutate(r, async () => {
+      const b = z
+        .object({
+          month: z.string(),
+          submit: z.boolean().default(false),
+          days: z
+            .array(
+              z.object({
+                date: z.string(),
+                routeId: z.string().optional(),
+                workType: z.string().default("Field work"),
+                jointWith: z.string().optional(),
+                notes: z.string().max(5000).optional(),
+              }),
+            )
+            .max(31),
+        })
+        .strict()
+        .parse(r.body);
+      return await service.saveTourMonth(r.user, b.month, b.days, b.submit);
+    }),
+  );
+  app.get("/api/tour-plans/month", async (r) => {
+    const q = z
+      .object({ month: z.string(), ownerId: z.string().optional() })
+      .parse(r.query);
+    return await service.tourMonth(r.user, q.month, q.ownerId ?? r.user.id);
+  });
+  app.get("/api/expenses/suggestion", async (r) => {
+    const q = z
+      .object({ date: z.string(), ownerId: z.string().optional() })
+      .parse(r.query);
+    return await service.expenseSuggestion(
+      r.user,
+      q.date,
+      q.ownerId ?? r.user.id,
+    );
+  });
+  app.post("/api/expenses/auto", async (r) =>
+    mutate(r, async () => {
+      const b = z.object({ date: z.string() }).strict().parse(r.body);
+      return await service.autoExpenses(r.user, b.date);
+    }),
+  );
+  app.post("/api/record/:id/move-sales", async (r) =>
+    mutate(
+      r,
+      async () =>
+        await service.moveSalesToNextMonth(
+          r.user,
+          id(r),
+          z.object({ version: z.number().int() }).parse(r.body).version,
+        ),
+    ),
+  );
   app.post("/api/record/:id/decision", async (r) =>
     mutate(r, async () => {
       const b = z
@@ -802,8 +858,10 @@ export async function buildApp(
     for (const key of Object.keys(defaultPolicies)) {
       shape[key] = z
         .number()
-        .min(key === "taPerKm" ? 0 : 1)
-        .max(key === "retentionDays" ? 3650 : 100000);
+        .min(["taPerKm", "weeklyOffDay"].includes(key) ? 0 : 1)
+        .max(
+          key === "retentionDays" ? 3650 : key === "weeklyOffDay" ? 7 : 100000,
+        );
     }
     const p = z.object(shape).strict().parse(r.body) as Record<string, number>;
     assert(

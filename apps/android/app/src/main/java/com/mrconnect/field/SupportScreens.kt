@@ -9,7 +9,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-private val Danger = Color(0xFFBC3F45)
 
 /** M04: public request to reset access from the sign-in screen. */
 @Composable
@@ -75,7 +74,7 @@ fun HelpScreen(vm: FieldViewModel) {
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(c.text("name"), color = Color.White, style = MaterialTheme.typography.titleLarge)
-            Text(c.text("email"), color = Color(0xFFBED1D7))
+            Text(c.text("email"), color = OnNavy)
         }
     }
     data?.array("topics")?.forEach { topic ->
@@ -127,7 +126,7 @@ fun HelpScreen(vm: FieldViewModel) {
 fun Restricted(vm: FieldViewModel) {
     LaunchedEffect(Unit) { vm.loadAccess() }
     val denied = vm.restrictedMessage.isNotEmpty()
-    FieldCard(color = if (denied) Color(0xFFFDEEF0) else Soft) {
+    FieldCard(color = if (denied) DangerBg else Soft) {
         Text(
             vm.t(if (denied) "Access restricted" else "Your access"),
             style = MaterialTheme.typography.titleLarge,
@@ -179,11 +178,11 @@ fun PendingReports(vm: FieldViewModel) {
         )
         Text(
             "${s.optInt("total")} · overdue ${s.optInt("overdue")} · due today ${s.optInt("dueToday")} · returned ${s.optInt("returned")}",
-            color = Color(0xFFBED1D7),
+            color = OnNavy,
         )
         Text(
             "Reports must be submitted within ${data.optInt("deadlineDays")} days of the visit date.",
-            color = Color(0xFFBED1D7),
+            color = OnNavy,
             style = MaterialTheme.typography.bodyMedium,
         )
     }
@@ -235,8 +234,8 @@ fun CampaignDoctors(vm: FieldViewModel) {
     val s = data.optJSONObject("summary") ?: JSONObject()
     FieldCard(color = Navy) {
         Text(c.text("name"), color = Color.White, style = MaterialTheme.typography.titleLarge)
-        Text(c.text("fromDate") + " → " + c.text("toDate"), color = Color(0xFFBED1D7))
-        Text(c.text("description"), color = Color(0xFFBED1D7), style = MaterialTheme.typography.bodyMedium)
+        Text(c.text("fromDate") + " → " + c.text("toDate"), color = OnNavy)
+        Text(c.text("description"), color = OnNavy, style = MaterialTheme.typography.bodyMedium)
     }
     FieldCard {
         Text(

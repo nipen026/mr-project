@@ -31,7 +31,7 @@ private fun shimmer(): Brush {
             label = "skeleton-x",
         )
     return Brush.linearGradient(
-        listOf(Color(0xFFE6EFF0), Color(0xFFF4F8F8), Color(0xFFE6EFF0)),
+        listOf(Color(0xFFE1E8EC), Color(0xFFF0F5F6), Color(0xFFE1E8EC)),
         start = Offset(x, 0f),
         end = Offset(x + 400f, 0f),
     )

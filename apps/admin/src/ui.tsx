@@ -247,14 +247,23 @@ export function Metric({
   label,
   value,
   hint,
+  icon,
+  tone,
 }: {
   label: string;
   value: ReactNode;
   hint: string;
+  icon?: string;
+  tone?: "ok" | "warn" | "bad" | "info";
 }) {
   return (
-    <div className="metric">
+    <div className={"metric" + (tone ? " " + tone : "")}>
       <span>{label}</span>
+      {icon && (
+        <span className="chip" aria-hidden="true">
+          <Icon name={icon} size={20} />
+        </span>
+      )}
       <strong>{value}</strong>
       <small>{hint}</small>
     </div>
@@ -301,11 +310,11 @@ export function BarChart({
   );
 }
 export function PageTitle({
-  eyebrow = "FIELD OPERATIONS",
   title,
   description,
   actions,
 }: {
+  /** Accepted for compatibility; the topbar breadcrumb now names the section. */
   eyebrow?: string;
   title: string;
   description: string;
@@ -313,7 +322,6 @@ export function PageTitle({
 }) {
   return (
     <>
-      <span className="eyebrow">{eyebrow}</span>
       <div className="page-title">
         <div>
           <h1>{title}</h1>

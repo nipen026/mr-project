@@ -12,7 +12,7 @@ import {
 } from "./ui";
 import { SupportRequests } from "./insights";
 import { Permissions } from "./Permissions";
-import { TextField } from "./controls";
+import { SelectField, TextField } from "./controls";
 const policyLabels: Record<string, string> = {
   gpsRadiusMeters: "Visit verification radius (m)",
   maxAccuracyMeters: "Maximum GPS uncertainty (m)",
@@ -26,6 +26,44 @@ const policyLabels: Record<string, string> = {
   trackingIntervalSeconds: "Tracking interval (seconds)",
   retentionDays: "Location retention period (days)",
 };
+const policyGroups: { title: string; help: string; keys: string[] }[] = [
+  {
+    title: "Visit verification",
+    help: "How strictly a call's GPS evidence is checked before it counts as verified.",
+    keys: ["gpsRadiusMeters", "maxAccuracyMeters"],
+  },
+  {
+    title: "Reporting",
+    help: "When reports are due and when a person is treated as out of touch.",
+    keys: ["reportDeadlineDays", "staleAfterMinutes", "weeklyOffDay"],
+  },
+  {
+    title: "Allowances & expenses",
+    help: "Rates used by the TA/DA calculator and the receipt rule for claims.",
+    keys: [
+      "localDA",
+      "exStationDA",
+      "outstationDA",
+      "taPerKm",
+      "receiptRequiredAbove",
+    ],
+  },
+  {
+    title: "Location tracking",
+    help: "How often phones report their position and how long points are kept.",
+    keys: ["trackingIntervalSeconds", "retentionDays"],
+  },
+];
+const weekdays = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "No weekly off",
+];
 export function Settings() {
   const { workspace, refresh, notify, version } = useWorkspace();
   const [search, setSearch] = useSearchParams();
@@ -103,25 +141,59 @@ export function Settings() {
               }
             }}
           >
-            <div className="form-grid">
-              {Object.entries(values).map(([key, value]) => (
-                <TextField
-                  key={key}
-                  label={policyLabels[key] || key}
-                  id={"policy-" + key}
-                  type="number"
-                  required
-                  min={key === "taPerKm" ? 0 : 1}
-                  max={key === "trackingIntervalSeconds" ? 900 : 100000}
-                  step="any"
-                  disabled={workspace.user.role !== "admin"}
-                  value={value}
-                  onChange={(e) =>
-                    setValues({ ...values, [key]: Number(e.target.value) })
-                  }
-                />
-              ))}
-            </div>
+            {policyGroups.map((g) => (
+              <fieldset className="policy-group" key={g.title}>
+                <legend>{g.title}</legend>
+                <p className="muted">{g.help}</p>
+                <div className="form-grid">
+                  {g.keys
+                    .filter((k) => k in values)
+                    .map((key) =>
+                      key === "weeklyOffDay" ? (
+                        <SelectField
+                          key={key}
+                          label="Weekly off day"
+                          id="policy-weeklyOffDay"
+                          hint="Filled in automatically on tour plans"
+                          disabled={workspace.user.role !== "admin"}
+                          value={String(values[key])}
+                          onChange={(e) =>
+                            setValues({
+                              ...values,
+                              [key]: Number(e.target.value),
+                            })
+                          }
+                        >
+                          {weekdays.map((d, n) => (
+                            <option key={d} value={n}>
+                              {d}
+                            </option>
+                          ))}
+                        </SelectField>
+                      ) : (
+                        <TextField
+                          key={key}
+                          label={policyLabels[key] || key}
+                          id={"policy-" + key}
+                          type="number"
+                          required
+                          min={key === "taPerKm" ? 0 : 1}
+                          max={key === "trackingIntervalSeconds" ? 900 : 100000}
+                          step="any"
+                          disabled={workspace.user.role !== "admin"}
+                          value={values[key]}
+                          onChange={(e) =>
+                            setValues({
+                              ...values,
+                              [key]: Number(e.target.value),
+                            })
+                          }
+                        />
+                      ),
+                    )}
+                </div>
+              </fieldset>
+            ))}
             {error && <Notice tone="error">{error}</Notice>}
             {workspace.user.role === "admin" && (
               <div className="form-actions">

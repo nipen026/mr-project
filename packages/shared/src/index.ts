@@ -22,13 +22,18 @@ export type Field = {
     | "select"
     | "reference"
     | "multireference"
-    | "file";
+    | "file"
+    | "lines";
   required?: boolean;
   options?: string[];
   ref?: string;
   min?: number;
   max?: number;
   hint?: string;
+  /** For "lines": whole-number columns captured against each referenced item. */
+  lineFields?: { key: string; label: string }[];
+  /** Heading shown above this field (and those after it) in long forms. */
+  section?: string;
 };
 export type Module = {
   key: string;
@@ -75,29 +80,40 @@ export const modules: Module[] = [
     group: "People & masters",
     columns: ["name", "type", "specialty", "area", "class", "routeId"],
     fields: [
-      f("name", "Customer name", "text", { required: true }),
+      f("name", "Customer name", "text", {
+        required: true,
+        section: "About the customer",
+      }),
       f("type", "Customer type", "select", {
         required: true,
-        options: ["Doctor", "Chemist", "Hospital", "Stockist"],
+        options: ["Doctor", "Chemist", "Hospital", "Stockist", "Dietitian"],
       }),
-      ref("assignedTo", "Assigned representative", "users"),
-      ref("routeId", "Route", "route"),
       f("specialty", "Specialty"),
       f("class", "Class", "select", { options: ["A+", "A", "B", "C"] }),
-      f("frequency", "Visits per month", "number", { min: 1, max: 31 }),
-      f("mobile", "Mobile number"),
+      f("qualification", "Qualification"),
       f("gender", "Gender", "select", {
         options: ["Female", "Male", "Other", "Prefer not to say"],
       }),
-      f("qualification", "Qualification"),
+      f("assignedTo", "Assigned representative", "reference", {
+        ref: "users",
+        required: true,
+        section: "Coverage",
+      }),
+      f("routeId", "Route", "reference", { ref: "route", required: true }),
+      f("frequency", "Visits per month", "number", { min: 1, max: 31 }),
       f("area", "Area", "text", { required: true }),
       f("state", "State"),
+      f("mobile", "Mobile number", "text", { section: "Contact & address" }),
+      f("pinCode", "PIN code"),
       f("clinicAddress", "Clinic / business address", "textarea", {
         required: true,
       }),
       f("residenceAddress", "Residence address", "textarea"),
-      f("pinCode", "PIN code"),
-      f("latitude", "Master latitude", "number", { min: -90, max: 90 }),
+      f("latitude", "Master latitude", "number", {
+        min: -90,
+        max: 90,
+        section: "Map location (used to verify visits)",
+      }),
       f("longitude", "Master longitude", "number", { min: -180, max: 180 }),
     ],
   },
@@ -122,6 +138,10 @@ export const modules: Module[] = [
       f("allowanceType", "DA type", "select", {
         required: true,
         options: ["Local", "Ex-station", "Outstation"],
+      }),
+      f("tripType", "Master distance covers", "select", {
+        options: ["Round trip", "One way"],
+        hint: "One way: TA is paid for the return journey as well (distance × 2)",
       }),
       f("frequency", "Visits per month", "number", { min: 1, max: 31 }),
       f("additionalAllowance", "Additional allowance (₹)", "number", {
@@ -164,7 +184,7 @@ export const modules: Module[] = [
     key: "campaign",
     title: "Campaign management",
     singular: "Campaign",
-    icon: "target",
+    icon: "megaphone",
     group: "Field operations",
     readOnlyForRep: true,
     columns: ["name", "fromDate", "toDate", "description"],
@@ -183,7 +203,7 @@ export const modules: Module[] = [
     key: "dayplan",
     title: "Day plans",
     singular: "Day plan",
-    icon: "calendar-days",
+    icon: "sun",
     group: "Field operations",
     columns: ["date", "ownerName", "routeId", "workType", "jointWith"],
     fields: [
@@ -207,13 +227,13 @@ export const modules: Module[] = [
     key: "tourplan",
     title: "Tour plans",
     singular: "Tour day",
-    icon: "calendar-days",
+    icon: "clipboard-list",
     group: "Field operations",
     approvable: true,
     columns: ["date", "ownerName", "routeId", "workType", "status"],
     fields: [
       date(),
-      ref("routeId", "Route", "route"),
+      ref("routeId", "Route", "route", false),
       f("workType", "Working type", "select", {
         required: true,
         options: [
@@ -222,6 +242,7 @@ export const modules: Module[] = [
           "Meeting",
           "Training",
           "Administration",
+          "Weekly off",
         ],
       }),
       ref("jointWith", "Work with", "users", false),
@@ -232,7 +253,7 @@ export const modules: Module[] = [
     key: "expense",
     title: "Expenses & TA/DA",
     singular: "Expense",
-    icon: "wallet",
+    icon: "receipt",
     group: "Approvals & reporting",
     approvable: true,
     columns: ["date", "ownerName", "category", "amount", "status"],
@@ -256,7 +277,7 @@ export const modules: Module[] = [
     key: "leave",
     title: "Leave requests",
     singular: "Leave request",
-    icon: "calendar-days",
+    icon: "plane",
     group: "Approvals & reporting",
     approvable: true,
     columns: ["ownerName", "fromDate", "toDate", "leaveType", "status"],
@@ -274,7 +295,7 @@ export const modules: Module[] = [
     key: "sponsorship",
     title: "Sponsorship requests",
     singular: "Sponsorship request",
-    icon: "target",
+    icon: "gift",
     group: "Approvals & reporting",
     approvable: true,
     columns: ["ownerName", "customerId", "campaignId", "amount", "status"],
@@ -293,7 +314,7 @@ export const modules: Module[] = [
     key: "sale",
     title: "Sales activity",
     singular: "Sales entry",
-    icon: "wallet",
+    icon: "shopping-cart",
     group: "Sales & inventory",
     columns: [
       "date",
@@ -325,10 +346,74 @@ export const modules: Module[] = [
     ],
   },
   {
+    key: "target",
+    title: "Monthly targets",
+    singular: "Target",
+    icon: "target",
+    group: "Approvals & reporting",
+    columns: [
+      "month",
+      "employeeId",
+      "doctorCalls",
+      "chemistCalls",
+      "pobTarget",
+      "salesTarget",
+    ],
+    fields: [
+      f("month", "Month", "text", {
+        required: true,
+        hint: "Format YYYY-MM, for example 2026-04",
+      }),
+      ref("employeeId", "Representative", "users"),
+      f("doctorCalls", "Doctor calls target", "number", {
+        min: 0,
+        max: 100000,
+      }),
+      f("chemistCalls", "Chemist calls target", "number", {
+        min: 0,
+        max: 100000,
+      }),
+      f("pobTarget", "POB target (₹)", "number", { min: 0, max: 1000000000 }),
+      f("salesTarget", "Sales target (₹)", "number", {
+        min: 0,
+        max: 1000000000,
+      }),
+    ],
+  },
+  {
+    key: "stockstatement",
+    title: "Stock & sales statements",
+    singular: "Statement",
+    icon: "file-spreadsheet",
+    group: "Sales & inventory",
+    approvable: true,
+    columns: ["month", "ownerName", "zeroSale", "totalSales", "status"],
+    fields: [
+      f("month", "Month", "text", {
+        required: true,
+        hint: "Format YYYY-MM, for example 2026-04",
+      }),
+      f("zeroSale", "Zero sale", "select", {
+        required: true,
+        options: ["No", "Yes"],
+      }),
+      f("lines", "Product stock & sales", "lines", {
+        ref: "product",
+        lineFields: [
+          { key: "opening", label: "Opening" },
+          { key: "receipts", label: "Receipts" },
+          { key: "sales", label: "Sales" },
+        ],
+      }),
+      f("attachmentId", "Attachment", "file"),
+      f("notes", "Remarks", "textarea"),
+    ],
+  },
+  {
     key: "challan",
     title: "Challan receipts",
     singular: "Challan",
-    icon: "package",
+    icon: "truck",
     group: "Sales & inventory",
     readOnlyForRep: true,
     columns: ["name", "date", "ownerName", "itemId", "quantity", "status"],
@@ -370,25 +455,59 @@ export const modules: Module[] = [
     key: "rcpa",
     title: "RCPA observations",
     singular: "RCPA entry",
-    icon: "chart-no-axes-combined",
+    icon: "clipboard-check",
     group: "Field operations",
     columns: [
       "date",
       "ownerName",
       "customerId",
+      "doctorId",
       "productId",
-      "competitor",
       "quantity",
+      "competitor",
+      "competitorQuantity",
+      "action",
     ],
     fields: [
       date(),
       ref("customerId", "Chemist", "customer"),
-      ref("productId", "Product", "product"),
-      f("competitor", "Competitor brand", "text", { required: true }),
-      f("quantity", "Monthly units", "number", {
+      ref("doctorId", "Doctor (prescriber)", "customer", false),
+      ref("productId", "Our product", "product"),
+      f("company", "Our company"),
+      f("rate", "Our rate (₹)", "number", {
+        min: 0,
+        hint: "Leave blank to use the product's unit price",
+      }),
+      f("quantity", "Our units", "number", {
         required: true,
         min: 0,
         max: 1000000,
+      }),
+      f("competitor", "Competitor brand", "text", { required: true }),
+      f("competitorRate", "Competitor rate (₹)", "number", { min: 0 }),
+      f("competitorQuantity", "Competitor units", "number", {
+        min: 0,
+        max: 1000000,
+      }),
+      f("moreCompetitors", "More competitor items", "textarea", {
+        hint: "One per line, at most five: brand, rate, units",
+      }),
+      f("potential", "Overall product potential (units)", "number", {
+        min: 0,
+        max: 100000000,
+      }),
+      f("objectiveQty", "Objective quantity", "number", {
+        min: 0,
+        max: 100000000,
+      }),
+      f("action", "Action", "select", {
+        options: [
+          "Detail again",
+          "Provide sample",
+          "Schedule follow-up",
+          "Escalate to manager",
+          "No action",
+        ],
       }),
       f("notes", "Observation", "textarea"),
     ],
@@ -397,7 +516,7 @@ export const modules: Module[] = [
     key: "announcement",
     title: "Head-office updates",
     singular: "Update",
-    icon: "bell",
+    icon: "message-square",
     group: "People & masters",
     readOnlyForRep: true,
     columns: ["title", "body", "createdAt"],
@@ -438,6 +557,7 @@ export const defaultPolicies = {
   exStationDA: 400,
   outstationDA: 650,
   taPerKm: 3.5,
+  weeklyOffDay: 0,
   trackingIntervalSeconds: 60,
   retentionDays: 180,
 };

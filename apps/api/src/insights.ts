@@ -367,7 +367,9 @@ export class Insights {
     const v = await this.s.record(u, id);
     assert(v.kind === "visit", 404, "Call not found");
     const policy = await this.s.policies(u);
-    const customer = await this.s.record(u, v.customerId);
+    const customer: any = v.customerId
+      ? await this.s.record(u, v.customerId)
+      : {};
     const loc = v.location || null;
     const skew = loc
       ? Math.abs(Date.parse(loc.observedAt) - Date.parse(v.visitedAt))

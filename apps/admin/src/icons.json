@@ -21,5 +21,18 @@
   "stethoscope": "/assets/tracking-context-imgVector13.svg",
   "menu": "/assets/mobile-workspace-context-imgVector.svg",
   "file-text": "/assets/mobile-context-imgVector5.svg",
-  "receipt": "/assets/mobile-context-imgVector6.svg"
+  "receipt": "/assets/mobile-context-imgVector6.svg",
+  "clipboard-list": "/assets/lucide-clipboard-list.svg",
+  "sun": "/assets/lucide-sun.svg",
+  "plane": "/assets/lucide-plane.svg",
+  "megaphone": "/assets/lucide-megaphone.svg",
+  "gift": "/assets/lucide-gift.svg",
+  "calculator": "/assets/lucide-calculator.svg",
+  "shopping-cart": "/assets/lucide-shopping-cart.svg",
+  "file-spreadsheet": "/assets/lucide-file-spreadsheet.svg",
+  "message-square": "/assets/lucide-message-square.svg",
+  "pill": "/assets/lucide-pill.svg",
+  "clipboard-check": "/assets/lucide-clipboard-check.svg",
+  "truck": "/assets/lucide-truck.svg",
+  "building": "/assets/lucide-building.svg"
 }

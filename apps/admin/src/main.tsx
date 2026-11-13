@@ -28,6 +28,8 @@ import {
   Reports,
   Team,
 } from "./pages";
+import { AllowanceCalculator, TourCalendar } from "./planning";
+import { locate, matches, navGroups, settingsItem, type NavItem } from "./nav";
 import {
   EmployeeProfile,
   Evidence,
@@ -193,20 +195,123 @@ function Login({ onSuccess }: { onSuccess: (u: User) => void }) {
     </div>
   );
 }
-const nav = [
-  ["/", "house", "Overview"],
-  ["/team", "users", "Field team"],
-  ["/customers", "stethoscope", "Customers"],
-  ["/module/route", "route", "Routes & territories"],
-  ["/module/tourplan", "calendar-days", "Tour plans"],
-  ["/tracking", "map-pin", "Calls & tracking"],
-  ["/approvals", "shield-check", "Approvals"],
-  ["/pob", "wallet", "POB & sales"],
-  ["/inventory", "package", "Samples & inputs"],
-  ["/module/campaign", "target", "Campaigns"],
-  ["/reports", "chart-no-axes-combined", "Reports"],
-  ["/settings", "settings", "Settings"],
-];
+const initials = (name: string) =>
+  name
+    .split(" ")
+    .map((x) => x[0])
+    .slice(0, 2)
+    .join("");
+function Sidebar({
+  workspace,
+  user,
+  open,
+  close,
+  pending,
+  logout,
+}: {
+  workspace: Workspace;
+  user: User;
+  open: boolean;
+  close: () => void;
+  pending: number;
+  logout: () => void;
+}) {
+  const here = useLocation().pathname;
+  const allowed = (i: NavItem) =>
+    !i.hideFor?.includes(user.role) &&
+    (!i.module || workspace.modules.some((m) => m.key === i.module));
+  const groups = navGroups
+    .map((g) => ({ ...g, items: g.items.filter(allowed) }))
+    .filter((g) => g.items.length);
+  const [closed, setClosed] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("mr-nav-closed") || "null");
+      if (saved) return saved;
+    } catch {
+      /* storage can be unavailable; fall back to defaults */
+    }
+    return Object.fromEntries(navGroups.map((g) => [g.id, !!g.collapsed]));
+  });
+  const toggle = (id: string) =>
+    setClosed((c) => {
+      const next = { ...c, [id]: !c[id] };
+      try {
+        localStorage.setItem("mr-nav-closed", JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  const link = (i: NavItem) => (
+    <NavLink
+      end={i.to === "/"}
+      key={i.to}
+      to={i.to}
+      className={matches(i, here) ? "active" : ""}
+      onClick={close}
+    >
+      <Icon name={i.icon} size={20} />
+      {i.label}
+      {i.to === "/approvals" && pending > 0 && (
+        <span className="nav-count" aria-hidden="true">
+          {pending}
+        </span>
+      )}
+    </NavLink>
+  );
+  return (
+    <aside className={open ? "sidebar open" : "sidebar"}>
+      <Link className="brand" to="/" onClick={close}>
+        <Icon name="briefcase-medical" size={28} />
+        MR Connect
+      </Link>
+      <nav aria-label="Main navigation">
+        {groups.map((g) => {
+          const active = g.items.some((i) => matches(i, here));
+          const shut = closed[g.id] && !active;
+          return (
+            <div className="nav-group" key={g.id}>
+              <button
+                type="button"
+                className="nav-heading"
+                aria-expanded={!shut}
+                onClick={() => toggle(g.id)}
+              >
+                {g.label}
+                <span
+                  className={shut ? "caret shut" : "caret"}
+                  aria-hidden="true"
+                >
+                  <Icon name="chevron-down" size={16} />
+                </span>
+              </button>
+              {!shut && g.items.map(link)}
+            </div>
+          );
+        })}
+      </nav>
+      <div className="nav-footer">
+        <nav aria-label="Workspace">{link(settingsItem)}</nav>
+        <div className="workspace-note">
+          <span className="avatar" aria-hidden="true">
+            {initials(user.name)}
+          </span>
+          <span>
+            <strong>{user.name}</strong>
+            <small>
+              {user.role === "rep" ? "Representative" : user.role} ·{" "}
+              {workspace.company.code}
+            </small>
+          </span>
+        </div>
+        <button className="logout" onClick={logout}>
+          <Icon name="log-out" size={22} />
+          <span>Sign out</span>
+        </button>
+      </div>
+    </aside>
+  );
+}
 function WorkspaceApp({ user, logout }: { user: User; logout: () => void }) {
   const route = useLocation();
   const [workspace, setWorkspace] = useState<Workspace>(),
@@ -214,8 +319,10 @@ function WorkspaceApp({ user, logout }: { user: User; logout: () => void }) {
     [version, setVersion] = useState(0),
     [toast, setToast] = useState(""),
     [search, setSearch] = useState(""),
-    [menu, setMenu] = useState(false);
+    [menu, setMenu] = useState(false),
+    [pending, setPending] = useState(0);
   const navigate = useNavigate();
+  const where = locate(route.pathname);
   const refresh = useCallback(async () => {
     const r = await api<Workspace>("/bootstrap");
     setWorkspace(r);
@@ -224,6 +331,12 @@ function WorkspaceApp({ user, logout }: { user: User; logout: () => void }) {
   useEffect(() => {
     refresh().catch((e) => setError(e.message));
   }, [refresh]);
+  useEffect(() => {
+    if (user.role === "rep") return;
+    api<{ items: unknown[] }>("/approvals")
+      .then((r) => setPending(r.items.length))
+      .catch(() => setPending(0));
+  }, [version, user.role]);
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(""), 4500);
@@ -242,49 +355,17 @@ function WorkspaceApp({ user, logout }: { user: User; logout: () => void }) {
       value={{ workspace, refresh, notify: setToast, version }}
     >
       <div className="app-shell">
-        <aside className={menu ? "sidebar open" : "sidebar"}>
-          <Link className="brand" to="/">
-            <Icon name="briefcase-medical" size={28} />
-            MR Connect
-          </Link>
-          <span className="sidebar-label">ADMIN WORKSPACE</span>
-          <nav aria-label="Main navigation">
-            {nav
-              .filter(
-                ([path]) =>
-                  user.role !== "rep" ||
-                  !["/team", "/approvals"].includes(path),
-              )
-              .map(([path, icon, title]) => (
-                <NavLink
-                  end={path === "/"}
-                  key={path}
-                  to={path}
-                  onClick={() => setMenu(false)}
-                >
-                  <Icon name={icon} size={20} />
-                  {title}
-                </NavLink>
-              ))}
-          </nav>
-          <div className="workspace-note">
-            <small>PHARMA DIVISION</small>
-            <strong>{workspace.company.code} · Field operations</strong>
-            <small>
-              {user.name} · {user.role}
-            </small>
-          </div>
-          <button
-            className="logout"
-            onClick={async () => {
-              await api("/auth/logout", json("POST", {}));
-              logout();
-            }}
-          >
-            <Icon name="log-out" size={22} />
-            <span>Sign out</span>
-          </button>
-        </aside>
+        <Sidebar
+          workspace={workspace}
+          user={user}
+          open={menu}
+          close={() => setMenu(false)}
+          pending={pending}
+          logout={async () => {
+            await api("/auth/logout", json("POST", {}));
+            logout();
+          }}
+        />
         <div className="main-shell">
           <header className="topbar">
             <button
@@ -294,9 +375,13 @@ function WorkspaceApp({ user, logout }: { user: User; logout: () => void }) {
             >
               ☰
             </button>
-            <span className="company-title">
-              {workspace.company.code} / Pharma division
-            </span>
+            <nav className="company-title" aria-label="Breadcrumb">
+              <span>{workspace.company.code}</span>
+              <span aria-hidden="true">›</span>
+              <span>{where.group}</span>
+              <span aria-hidden="true">›</span>
+              <strong>{where.page}</strong>
+            </nav>
             <form
               className="global-search"
               onSubmit={(e) => {
@@ -324,11 +409,7 @@ function WorkspaceApp({ user, logout }: { user: User; logout: () => void }) {
               aria-label="Account settings"
               to="/settings?tab=account"
             >
-              {user.name
-                .split(" ")
-                .map((x) => x[0])
-                .slice(0, 2)
-                .join("")}
+              {initials(user.name)}
             </Link>
           </header>
           <main className="content">
@@ -358,6 +439,8 @@ function WorkspaceApp({ user, logout }: { user: User; logout: () => void }) {
                     element={<RecordsPage key={m.key} kind={m.key} />}
                   />
                 ))}
+                <Route path="/tour-calendar" element={<TourCalendar />} />
+                <Route path="/allowance" element={<AllowanceCalculator />} />
                 <Route path="/approvals" element={<Approvals />} />
                 <Route path="/inventory" element={<Inventory />} />
                 <Route path="/reports" element={<Reports />} />
@@ -367,15 +450,6 @@ function WorkspaceApp({ user, logout }: { user: User; logout: () => void }) {
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </div>
-            <footer className="content-footer">
-              <Link to="/activity">Calls & daily reports</Link>
-              <Link to="/module/expense">Expenses</Link>
-              <Link to="/module/leave">Leave</Link>
-              <Link to="/module/sponsorship">Sponsorship</Link>
-              <Link to="/module/rcpa">RCPA</Link>
-              <Link to="/module/reminder">Reminders</Link>
-              <Link to="/module/dayplan">Day plans</Link>
-            </footer>
           </main>
         </div>
         {toast && (

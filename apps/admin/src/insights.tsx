@@ -4,6 +4,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { api, json } from "./api";
 import { useWorkspace } from "./context";
+import { humanize } from "./nav";
 import {
   Badge,
   BarChart,
@@ -829,8 +830,7 @@ export const visualReports = [
   "missed-coverage",
   "product-reach",
 ];
-const pretty = (k: string) =>
-  k.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
+const pretty = (k: string) => humanize(k);
 export function VisualReport({
   type,
   from,

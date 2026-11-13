@@ -23,7 +23,15 @@ export const WorkspaceContext = createContext<{
 export const useWorkspace = () => useContext(WorkspaceContext);
 export function label(workspace: Workspace, key: string, value: any): string {
   if (value === undefined || value === null || value === "") return "—";
-  if (["assignedTo", "jointWith", "recipientId", "ownerId"].includes(key))
+  if (
+    [
+      "assignedTo",
+      "jointWith",
+      "recipientId",
+      "ownerId",
+      "employeeId",
+    ].includes(key)
+  )
     return workspace.users.find((u) => u.id === value)?.name || value;
   const list = Object.values(workspace.records).flat();
   if (typeof value === "string") {

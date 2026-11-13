@@ -208,6 +208,36 @@ fun ReportsScreen(vm: FieldViewModel) {
         }
         Message("Offline: these totals use the records already synced to this phone.")
     } else SkeletonCards(2)
+    run {
+        val month = localDate().take(7)
+        val mine = vm.records("target").find {
+            it.text("employeeId") == vm.user.text("id") && it.text("month") == month
+        }
+        if (mine != null) {
+            val calls = vm.records("visit").filter {
+                it.text("ownerId") == vm.user.text("id") &&
+                    it.text("date").startsWith(month)
+            }
+            val dr = calls.count { it.text("customerType") == "Doctor" }
+            val ch = calls.count { it.text("customerType") == "Chemist" }
+            val pob = calls.sumOf { it.optDouble("orderTotal", 0.0) }
+            fun line(name: String, actual: Double, target: Double, money: Boolean): String =
+                if (target <= 0) ""
+                else {
+                    val fmt = { v: Double -> if (money) rupees(v) else v.toInt().toString() }
+                    "$name: ${fmt(actual)} / ${fmt(target)} (${(actual / target * 100).toInt()}%)\n"
+                }
+            FieldCard {
+                Text("Target vs achievement · $month", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    (line("Doctor calls", dr.toDouble(), mine.optDouble("doctorCalls"), false) +
+                            line("Chemist calls", ch.toDouble(), mine.optDouble("chemistCalls"), false) +
+                            line("POB", pob, mine.optDouble("pobTarget"), true))
+                        .trim()
+                )
+            }
+        }
+    }
     listOf(
             "dcr" to "Daily reports",
             "expense" to "Expense statement",

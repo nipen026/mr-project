@@ -5,9 +5,10 @@ import {
   TextAreaField,
   TextField,
 } from "./controls";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { api, json } from "./api";
 import { Button, Notice, Modal } from "./ui";
+import { humanize } from "./nav";
 import { useWorkspace, label } from "./context";
 import type {
   Field,
@@ -31,7 +32,7 @@ export function RecordForm({
       mod.fields.map((f) => [
         f.key,
         initial?.[f.key] ??
-          (f.type === "multireference"
+          (f.type === "multireference" || f.type === "lines"
             ? []
             : f.key === "assignedTo" || f.key === "recipientId"
               ? workspace.user.id
@@ -79,12 +80,14 @@ export function RecordForm({
       <form onSubmit={submit}>
         <div className="form-grid">
           {mod.fields.map((f) => (
-            <FieldInput
-              key={f.key}
-              field={f}
-              value={values[f.key]}
-              onChange={(v) => setValues({ ...values, [f.key]: v })}
-            />
+            <Fragment key={f.key}>
+              {f.section && <h3 className="form-section full">{f.section}</h3>}
+              <FieldInput
+                field={f}
+                value={values[f.key]}
+                onChange={(v) => setValues({ ...values, [f.key]: v })}
+              />
+            </Fragment>
           ))}
         </div>
         {error && <Notice tone="error">{error}</Notice>}
@@ -145,6 +148,61 @@ export function FieldInput({
         ))}
       </SelectField>
     );
+  if (f.type === "lines") {
+    const rows: any[] = Array.isArray(value) ? value : [];
+    const cols = f.lineFields ?? [];
+    const set = (itemId: string, key: string, raw: string) => {
+      const n = raw === "" ? 0 : Math.max(0, Math.floor(Number(raw)));
+      const next = rows.some((r) => r.itemId === itemId)
+        ? rows.map((r) => (r.itemId === itemId ? { ...r, [key]: n } : r))
+        : [
+            ...rows,
+            {
+              itemId,
+              ...Object.fromEntries(cols.map((c) => [c.key, 0])),
+              [key]: n,
+            },
+          ];
+      onChange(next.filter((r) => cols.some((c) => r[c.key] > 0)));
+    };
+    return (
+      <FieldShell label={label} id={id} className="full" required={f.required}>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Product</th>
+              {cols.map((c) => (
+                <th key={c.key}>{c.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {options.map((o) => {
+              const row = rows.find((r) => r.itemId === o.id);
+              return (
+                <tr key={o.id}>
+                  <td>{o.name}</td>
+                  {cols.map((c) => (
+                    <td key={c.key}>
+                      <input
+                        className="control"
+                        type="number"
+                        min={0}
+                        step={1}
+                        aria-label={o.name + " " + c.label}
+                        value={row?.[c.key] ?? ""}
+                        onChange={(e) => set(o.id, c.key, e.target.value)}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </FieldShell>
+    );
+  }
   if (f.type === "multireference")
     return (
       <SelectField
@@ -344,7 +402,7 @@ export function RecordDetail({
         (key) =>
           ({
             key,
-            label: key.replace(/([A-Z])/g, " $1"),
+            label: humanize(key),
             type: "text",
           }) as Field,
       );
@@ -408,7 +466,32 @@ export function RecordDetail({
             <div key={f.key}>
               <dt>{f.label}</dt>
               <dd>
-                {f.type === "file" && r[f.key] ? (
+                {f.type === "lines" ? (
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Product</th>
+                        {(f.lineFields ?? []).map((c) => (
+                          <th key={c.key}>{c.label}</th>
+                        ))}
+                        <th>Moved in</th>
+                        <th>Closing</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(r[f.key] ?? []).map((v: any) => (
+                        <tr key={v.itemId}>
+                          <td>{label(workspace, "itemId", v.itemId)}</td>
+                          {(f.lineFields ?? []).map((c) => (
+                            <td key={c.key}>{v[c.key]}</td>
+                          ))}
+                          <td>{v.carriedIn ?? 0}</td>
+                          <td>{v.closing}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : f.type === "file" && r[f.key] ? (
                   <a href={"/api/attachments/" + r[f.key]}>
                     Download attachment
                   </a>

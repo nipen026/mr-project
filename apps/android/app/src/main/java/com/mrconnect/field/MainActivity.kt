@@ -47,9 +47,9 @@ fun Primary(text: String, enabled: Boolean = true, onClick: () -> Unit) {
         onClick = onClick,
         enabled = enabled,
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(10.dp),
     ) {
-        Text(text)
+        Text(text, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -59,11 +59,15 @@ fun Secondary(text: String, enabled: Boolean = true, onClick: () -> Unit) {
         onClick = onClick,
         enabled = enabled,
         colors =
-            ButtonDefaults.filledTonalButtonColors(containerColor = Soft, contentColor = Brand),
+            ButtonDefaults.filledTonalButtonColors(
+                containerColor = Color.White,
+                contentColor = BrandStrong,
+            ),
+        border = BorderStroke(1.dp, LineStrong),
         modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(10.dp),
     ) {
-        Text(text)
+        Text(text, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -75,9 +79,10 @@ fun FieldCard(
 ) {
     Surface(
         modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         color = color,
         border = if (color == Color.White) BorderStroke(1.dp, Line) else null,
+        shadowElevation = if (color == Color.White) 1.dp else 0.dp,
     ) {
         Column(
             Modifier.padding(16.dp),
@@ -90,14 +95,14 @@ fun FieldCard(
 @Composable
 fun Message(text: String, error: Boolean = false) {
     Surface(
-        color = if (error) Color(0xFFFDEEF0) else Soft,
-        shape = RoundedCornerShape(12.dp),
+        color = if (error) DangerBg else Soft,
+        shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Text(
             text,
             Modifier.padding(16.dp),
-            color = if (error) Color(0xFFBC3F45) else Ink,
+            color = if (error) Color(0xFF912018) else Ink,
             style = MaterialTheme.typography.bodyMedium,
         )
     }
@@ -303,7 +308,7 @@ fun FieldApp(vm: FieldViewModel) {
         containerColor = Canvas,
         topBar = {
             if (!auth)
-                Surface(color = Color.White) {
+                Surface(color = Color.White, shadowElevation = 1.dp) {
                     Row(
                         Modifier.statusBarsPadding()
                             .fillMaxWidth()
@@ -346,6 +351,7 @@ fun FieldApp(vm: FieldViewModel) {
                                     vm.screen == "campaign-doctors" -> vm.t("Campaign doctors")
                                     vm.screen == "addresses" -> vm.t("Customer addresses")
                                     vm.screen == "access-help" -> vm.t("Reset access")
+                                    vm.screen == "tour-month" -> vm.t("Plan the month")
                                     else ->
                                         vm.modules
                                             .find { vm.screen == "module/" + it.text("key") }
@@ -373,7 +379,7 @@ fun FieldApp(vm: FieldViewModel) {
         },
         bottomBar = {
             if (!auth)
-                Surface(color = Color.White) {
+                Surface(color = Color.White, shadowElevation = 8.dp) {
                     Row(
                         Modifier.navigationBarsPadding()
                             .fillMaxWidth()
@@ -401,7 +407,10 @@ fun FieldApp(vm: FieldViewModel) {
                                         Text(
                                             vm.t(title),
                                             style = MaterialTheme.typography.bodyMedium,
-                                            color = if (vm.screen == route) Brand else Muted,
+                                            color = if (vm.screen == route) BrandStrong else Muted,
+                                            fontWeight =
+                                                if (vm.screen == route) FontWeight.ExtraBold
+                                                else FontWeight.Medium,
                                         )
                                     }
                                 }
@@ -421,8 +430,26 @@ fun FieldApp(vm: FieldViewModel) {
                     Message(vm.message)
                 }
             if (vm.offline && !auth)
-                TextButton(onClick = { vm.navigate("sync") }) {
-                    Text("Offline · saved work stays on this phone. Open sync center →")
+                Surface(
+                    onClick = { vm.navigate("sync") },
+                    color = WarnBg,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth(),
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        FieldIcon("refresh-cw", 20)
+                        Text(
+                            "Offline. Saved work stays on this phone. Open sync center",
+                            color = Warn,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
             Column(
                 Modifier.weight(1f)
@@ -452,6 +479,7 @@ fun FieldApp(vm: FieldViewModel) {
                     vm.screen == "help" -> HelpScreen(vm)
                     vm.screen == "restricted" -> Restricted(vm)
                     vm.screen == "pending-reports" -> PendingReports(vm)
+                    vm.screen == "tour-month" -> TourMonth(vm)
                     vm.screen == "campaign-doctors" -> CampaignDoctors(vm)
                     vm.screen == "addresses" -> CustomerAddresses(vm)
                     vm.screen.startsWith("module/") -> ModuleList(vm, vm.screen.substringAfter('/'))
@@ -476,7 +504,7 @@ fun Welcome(onContinue: () -> Unit) {
         )
         Text(
             "Plan your day, meet your customers and report with confidence.",
-            color = Color(0xFFBED1D7),
+            color = OnNavy,
         )
     }
     Text("YOUR FIELD WORKSPACE", color = Brand, style = MaterialTheme.typography.bodyMedium)
@@ -602,8 +630,8 @@ fun Home(vm: FieldViewModel, shiftAction: () -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(
                 Triple("calls", "stethoscope", vm.t("Log a call")),
-                Triple("module/expense", "wallet", vm.t("Expenses")),
-                Triple("dcr", "calendar-days", vm.t("Daily report")),
+                Triple("module/expense", "receipt", vm.t("Expenses")),
+                Triple("dcr", "file-text", vm.t("Daily report")),
             )
             .forEach { (route, icon, title) ->
                 Box(Modifier.weight(1f)) {
@@ -661,9 +689,10 @@ fun Calls(vm: FieldViewModel) {
     Choice(
         vm.t("Customer type"),
         type,
-        listOf("Doctor", "Chemist", "Hospital", "Stockist").map { it to it },
+        listOf("Doctor", "Chemist", "Hospital", "Stockist", "Dietitian").map { it to it },
         { type = it },
     )
+    Secondary(vm.t("Non-listed call")) { vm.startNonListedCall() }
     Entry(vm.t("Search customers"), query, { query = it })
     val visits = vm.records("visit").filter { it.text("date") == localDate() }
     val customers =
@@ -683,6 +712,8 @@ fun Calls(vm: FieldViewModel) {
                 c.text("specialty") + " · " + c.text("area") + " · " + c.text("class"),
                 color = Muted,
             )
+            val last = vm.lastVisited(c.text("id"))
+            if (last.isNotEmpty()) Text("Last visited: $last", color = Muted)
             Text(
                 if (visits.any { it.text("customerId") == c.text("id") }) vm.t("Visited today")
                 else vm.t("Planned customer"),
@@ -719,44 +750,127 @@ fun Plan(vm: FieldViewModel) {
     }
 }
 
+private data class MoreItem(
+    val route: String,
+    val icon: String,
+    val label: String,
+    /** When set, the item is shown only if this module is readable. */
+    val module: String? = null,
+)
+
+/** Same task-based grouping as the admin sidebar. */
+private val moreGroups =
+    listOf(
+        "Today" to
+            listOf(
+                MoreItem("module/dcr", "file-text", "Daily call reports"),
+                MoreItem("pending-reports", "clipboard-check", "Pending reporting dates"),
+                MoreItem("reports", "chart-no-axes-combined", "My performance"),
+            ),
+        "Planning" to
+            listOf(
+                MoreItem("tour-month", "calendar-days", "Plan the month"),
+                MoreItem("module/tourplan", "clipboard-list", "Tour plans", "tourplan"),
+                MoreItem("module/dayplan", "sun", "Day plans", "dayplan"),
+                MoreItem("module/target", "target", "Targets", "target"),
+                MoreItem("module/campaign", "megaphone", "Campaigns", "campaign"),
+                MoreItem("module/leave", "plane", "Leave", "leave"),
+            ),
+        "People & masters" to
+            listOf(
+                MoreItem("module/route", "route", "Routes", "route"),
+                MoreItem("module/territory", "building", "Head quarters", "territory"),
+                MoreItem("module/product", "pill", "Products", "product"),
+                MoreItem("module/input", "package", "Promotional inputs", "input"),
+            ),
+        "Money & stock" to
+            listOf(
+                MoreItem("module/expense", "receipt", "Expenses", "expense"),
+                MoreItem("module/sale", "shopping-cart", "Sales activity", "sale"),
+                MoreItem("module/stockstatement", "file-spreadsheet", "Stock statements", "stockstatement"),
+                MoreItem("stock", "package", "Stock balances"),
+                MoreItem("module/challan", "truck", "Challan receipts", "challan"),
+                MoreItem("module/sponsorship", "gift", "Sponsorship", "sponsorship"),
+            ),
+        "Field records" to
+            listOf(
+                MoreItem("module/rcpa", "clipboard-check", "RCPA", "rcpa"),
+                MoreItem("module/reminder", "bell", "Call reminders", "reminder"),
+                MoreItem("module/announcement", "message-square", "Head-office updates", "announcement"),
+            ),
+        "Account" to
+            listOf(
+                MoreItem("sync", "refresh-cw", "Sync center"),
+                MoreItem("account", "settings", "Account & settings"),
+                MoreItem("access", "shield-check", "My access"),
+                MoreItem("help", "circle-help", "Help & support"),
+            ),
+    )
+
 @Composable
 fun More(vm: FieldViewModel) {
+    val role =
+        if (vm.user.text("role") == "rep") "Representative"
+        else vm.user.text("role").replaceFirstChar { it.uppercase() }
     FieldCard(color = Navy) {
         Text(vm.user.text("name"), color = Color.White, style = MaterialTheme.typography.titleLarge)
-        Text(vm.user.text("email"), color = Color(0xFFBED1D7))
-        Text(vm.t("YOUR COMPANY WORKSPACE"), color = Color(0xFFD9FF59), fontSize = 11.sp)
+        Text(vm.user.text("email"), color = OnNavy)
+        Text(
+            role + " · " + vm.boot?.optJSONObject("company")?.text("code").orEmpty(),
+            color = Color(0xFFD9FF59),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Bold,
+        )
     }
-    vm.modules
-        .groupBy { it.text("group") }
-        .forEach { (group, list) ->
-            Text(group.uppercase(), color = Brand, style = MaterialTheme.typography.bodyMedium)
-            list.forEach { m ->
-                Surface(
-                    onClick = { vm.navigate("module/" + m.text("key")) },
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, Line),
-                ) {
+    val readable = vm.modules.map { it.text("key") }.toSet()
+    moreGroups.forEach { (group, items) ->
+        val shown = items.filter { it.module == null || it.module in readable }
+        if (shown.isEmpty()) return@forEach
+        Text(
+            group.uppercase(),
+            color = Subtle,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.ExtraBold,
+            modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+        )
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = Color.White,
+            border = BorderStroke(1.dp, Line),
+        ) {
+            Column {
+                shown.forEachIndexed { n, item ->
+                    if (n > 0) HorizontalDivider(color = Line)
                     Row(
-                        Modifier.fillMaxWidth().padding(16.dp),
+                        Modifier.fillMaxWidth()
+                            .clickable {
+                                when (item.route) {
+                                    "stock" -> {
+                                        vm.navigate("stock")
+                                        vm.screen = "module/inventory"
+                                    }
+                                    "access" -> vm.openAccess()
+                                    else -> vm.navigate(item.route)
+                                }
+                            }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
-                        FieldIcon(m.text("icon"))
-                        Text(m.text("title"), Modifier.weight(1f))
-                        Text("›", color = Brand)
+                        Surface(shape = RoundedCornerShape(10.dp), color = Soft) {
+                            Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
+                                FieldIcon(item.icon, 22)
+                            }
+                        }
+                        Text(
+                            vm.t(item.label),
+                            Modifier.weight(1f),
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        FieldIcon("chevron-right", 20)
                     }
                 }
             }
         }
-    Secondary(vm.t("Daily call reports")) { vm.navigate("module/dcr") }
-    Secondary(vm.t("Pending reporting dates")) { vm.navigate("pending-reports") }
-    Secondary(vm.t("Stock & sales")) {
-        vm.navigate("stock")
-        vm.screen = "module/inventory"
     }
-    Secondary(vm.t("Sync center")) { vm.navigate("sync") }
-    Secondary(vm.t("Account & settings")) { vm.navigate("account") }
-    Secondary(vm.t("My access")) { vm.openAccess() }
-    Secondary(vm.t("Help & support")) { vm.navigate("help") }
 }
