@@ -231,8 +231,10 @@ export function Modal({
             <h2>{title}</h2>
           </div>
           <button
+            type="button"
             className="icon-button"
             aria-label="Close dialog"
+            title="Close"
             onClick={onClose}
           >
             ×
@@ -361,7 +363,7 @@ export function Table({
                 {c.label}
               </th>
             ))}
-            {onRow && <th>Action</th>}
+            {onRow && <th className="action-col">View</th>}
           </tr>
         </thead>
         <tbody>
@@ -381,14 +383,17 @@ export function Table({
               {onRow && (
                 <td data-label="Action">
                   <button
-                    className="text-button"
+                    type="button"
+                    className="icon-action"
                     onClick={() => onRow(r)}
+                    title="View details"
                     aria-label={
                       "View " +
                       (r.name || r.title || r.ownerName || r.id || "record")
                     }
                   >
-                    View details →
+                    <Icon name="eye" size={20} />
+                    <span className="icon-action-text">View details</span>
                   </button>
                 </td>
               )}

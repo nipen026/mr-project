@@ -41,7 +41,7 @@ test("sign-in, customer CRUD, validation, search and persistence", async ({
     .getByRole("button", { name: "Save customer", exact: true })
     .click();
   await expect(page.getByRole("dialog")).toContainText("Dr. Browser Test");
-  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("button", { name: "Close dialog" }).click();
   await page
     .getByRole("searchbox", { name: "Search", exact: true })
     .fill("Browser Test");
@@ -77,7 +77,7 @@ test("manager can return a claim with a reason and record the decision", async (
   await page
     .getByRole("button", { name: "Return for correction", exact: true })
     .click();
-  await expect(page.getByRole("dialog")).toContainText("returned");
+  await expect(page.getByRole("dialog")).toContainText(/returned/i);
   await expect(page.getByRole("dialog")).toContainText(
     "Please attach travel details",
   );

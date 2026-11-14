@@ -1,6 +1,4 @@
-import { useEffect, useRef, useState } from "react";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import { useEffect, useState } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import {
@@ -15,6 +13,7 @@ import {
   useResource,
 } from "./ui";
 import { DateField, SelectField } from "./controls";
+import { RouteReplay } from "./RouteReplay";
 export function TrackingPage() {
   const { workspace, version } = useWorkspace();
   const users = workspace.users.filter((u) => u.role === "rep");
@@ -23,8 +22,6 @@ export function TrackingPage() {
     new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }),
   );
   const [tick, setTick] = useState(0);
-  const [cursor, setCursor] = useState(0);
-  const [playing, setPlaying] = useState(false);
   const { data, error, loading } = useResource(
     () => api("/tracking/" + employee + "?date=" + date),
     [employee, date, version, tick],
@@ -39,27 +36,7 @@ export function TrackingPage() {
     }, 30000);
     return () => clearInterval(timer);
   }, []);
-  useEffect(() => {
-    setCursor(Math.max(0, (data?.points.length || 0) - 1));
-    setPlaying(false);
-  }, [data]);
-  useEffect(() => {
-    if (!playing) return;
-    const timer = setInterval(
-      () =>
-        setCursor((c) => {
-          if (c >= (data?.points.length || 1) - 1) {
-            setPlaying(false);
-            return c;
-          }
-          return c + 1;
-        }),
-      800,
-    );
-    return () => clearInterval(timer);
-  }, [playing, data]);
-  const points = data?.points || [],
-    point = points[cursor];
+  const points = data?.points || [];
   return (
     <>
       <PageTitle
@@ -138,38 +115,7 @@ export function TrackingPage() {
                 </div>
                 {points.length ? (
                   <>
-                    <Map points={points} cursor={cursor} />
-                    <div className="replay">
-                      <Button
-                        secondary
-                        disabled={points.length < 2}
-                        onClick={() => {
-                          if (cursor === points.length - 1) setCursor(0);
-                          setPlaying(!playing);
-                        }}
-                      >
-                        {playing ? "Pause" : "Play route"}
-                      </Button>
-                      <input
-                        type="range"
-                        aria-label="Replay position"
-                        min="0"
-                        max={points.length - 1}
-                        value={cursor}
-                        onChange={(e) => {
-                          setPlaying(false);
-                          setCursor(Number(e.target.value));
-                        }}
-                      />
-                      <time>
-                        {point &&
-                          new Date(point.observed_at).toLocaleTimeString()}
-                      </time>
-                    </div>
-                    <p className="muted">
-                      {point &&
-                        `${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)} · ±${Math.round(point.accuracy)} m · Battery ${point.battery ?? "unknown"}%${point.mocked ? " · Mock location" : ""}`}
-                    </p>
+                    <RouteReplay points={points} gaps={data.gaps} />
                   </>
                 ) : (
                   <Empty
@@ -261,69 +207,5 @@ export function TrackingPage() {
         </section>
       )}
     </>
-  );
-}
-function Map({ points, cursor }: { points: any[]; cursor: number }) {
-  const ref = useRef<HTMLDivElement>(null),
-    map = useRef<L.Map | null>(null),
-    layer = useRef<L.LayerGroup | null>(null);
-  useEffect(() => {
-    if (!ref.current) return;
-    const m = L.map(ref.current, { scrollWheelZoom: false }).setView(
-      [points[0].latitude, points[0].longitude],
-      14,
-    );
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution:
-        '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      maxZoom: 19,
-    }).addTo(m);
-    map.current = m;
-    layer.current = L.layerGroup().addTo(m);
-    if (points.length > 1)
-      m.fitBounds(
-        L.latLngBounds(points.map((p) => [p.latitude, p.longitude])),
-        { padding: [30, 30], maxZoom: 16 },
-      );
-    return () => {
-      m.remove();
-      map.current = null;
-    };
-  }, [points]);
-  useEffect(() => {
-    const group = layer.current;
-    if (!group) return;
-    group.clearLayers();
-    const shown = points.slice(0, cursor + 1);
-    L.polyline(
-      shown.map((p) => [p.latitude, p.longitude]),
-      { color: "#087f83", weight: 4 },
-    ).addTo(group);
-    const p = points[cursor];
-    if (p) {
-      L.circle([p.latitude, p.longitude], {
-        radius: p.accuracy,
-        color: p.mocked ? "#bc3f45" : "#087f83",
-        weight: 1,
-        fillOpacity: 0.12,
-      }).addTo(group);
-      L.circleMarker([p.latitude, p.longitude], {
-        radius: 7,
-        color: "#fff",
-        weight: 3,
-        fillColor: "#087f83",
-        fillOpacity: 1,
-      })
-        .addTo(group)
-        .bindPopup(new Date(p.observed_at).toLocaleString());
-    }
-  }, [points, cursor]);
-  return (
-    <div
-      ref={ref}
-      className="map"
-      role="img"
-      aria-label="Recorded location route map"
-    />
   );
 }

@@ -7,7 +7,7 @@ import {
 } from "./controls";
 import { Fragment, useEffect, useState } from "react";
 import { api, json } from "./api";
-import { Button, Notice, Modal } from "./ui";
+import { Badge, Button, Notice, Modal } from "./ui";
 import { humanize } from "./nav";
 import { useWorkspace, label } from "./context";
 import type {
@@ -420,7 +420,7 @@ export function RecordDetail({
         <span>
           {r.ownerName} · Version {r.version}
         </span>
-        <span className={"badge " + r.status}>{r.status}</span>
+        <Badge status={r.status} />
       </div>
       <dl className="details">
         {fields.map((f) =>
@@ -667,9 +667,6 @@ export function RecordDetail({
               Submit for review
             </Button>
           )}
-        <Button secondary onClick={onClose}>
-          Close
-        </Button>
       </div>
     </Modal>
   );

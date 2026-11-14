@@ -70,9 +70,11 @@ fun ModuleList(vm: FieldViewModel, kind: String) {
                     Text("Waiting to sync", color = Muted, style = MaterialTheme.typography.bodyMedium)
             }
             val heading =
-                r.text(
-                    "name",
-                    r.text("title", r.text("date", r.text("fromDate", mod?.text("singular") ?: kind))),
+                capitalizeWords(
+                    r.text(
+                        "name",
+                        r.text("title", r.text("date", r.text("fromDate", mod?.text("singular") ?: kind))),
+                    )
                 )
             (mod?.optJSONArray("columns") ?: JSONArray().put("visits").put("pob")).let { cols ->
                 (0 until cols.length())
@@ -80,7 +82,7 @@ fun ModuleList(vm: FieldViewModel, kind: String) {
                     .filter { key ->
                         r.has(key) &&
                             key !in listOf("name", "status", "ownerName") &&
-                            vm.names(r.text(key)) != heading
+                            capitalizeWords(vm.names(r.text(key))) != heading
                     }
                     .take(3)
                     .forEach { key ->
@@ -91,7 +93,7 @@ fun ModuleList(vm: FieldViewModel, kind: String) {
                                 color = Subtle,
                             )
                             Text(
-                                vm.names(r.text(key)),
+                                capitalizeWords(vm.names(r.text(key))),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = Ink,
                             )
@@ -267,7 +269,7 @@ fun RecordEditor(vm: FieldViewModel) {
                 vm.records(f.text("ref")).forEach { r ->
                     val checked = multiples[key]?.contains(r.text("id")) == true
                     Row {
-                        Checkbox(
+                        FieldCheckbox(
                             checked,
                             onCheckedChange = { on ->
                                 multiples[key] =
@@ -427,7 +429,7 @@ fun Detail(vm: FieldViewModel) {
                                 )
                             }
                         }
-                    else -> Text(vm.names(r.text(key)))
+                    else -> Text(capitalizeWords(vm.names(r.text(key))))
                 }
             }
         }

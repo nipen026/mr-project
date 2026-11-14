@@ -145,11 +145,35 @@ fun StatusBadge(status: String) {
                     .background(fg, androidx.compose.foundation.shape.CircleShape)
             )
             Text(
-                status.replaceFirstChar { it.uppercase() },
+                capitalizeWords(status),
                 color = fg,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
             )
         }
     }
+}
+
+/** The one checkbox used across the app, coloured from the theme like the admin's. */
+@Composable
+fun FieldCheckbox(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    Checkbox(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        modifier = modifier,
+        enabled = enabled,
+        colors =
+            CheckboxDefaults.colors(
+                checkedColor = Brand,
+                uncheckedColor = LineStrong,
+                checkmarkColor = Color.White,
+                disabledCheckedColor = Brand.copy(alpha = 0.5f),
+                disabledUncheckedColor = Line,
+            ),
+    )
 }

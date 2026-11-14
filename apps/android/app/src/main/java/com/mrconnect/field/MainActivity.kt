@@ -709,7 +709,7 @@ fun Calls(vm: FieldViewModel) {
         FieldCard {
             Text(c.text("name"), style = MaterialTheme.typography.titleMedium)
             Text(
-                c.text("specialty") + " · " + c.text("area") + " · " + c.text("class"),
+                capitalizeWords(c.text("specialty") + " · " + c.text("area") + " · " + c.text("class")),
                 color = Muted,
             )
             val last = vm.lastVisited(c.text("id"))

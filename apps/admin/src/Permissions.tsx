@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, json } from "./api";
+import { Checkbox } from "./controls";
 import { useWorkspace } from "./context";
 import { Button, ContentSkeleton, Notice, useResource } from "./ui";
 
@@ -138,26 +139,26 @@ export function Permissions() {
                 return (
                   <div className="perm-row" role="row" key={m.key}>
                     <span role="cell">{m.title}</span>
-                    <label role="cell">
-                      <input
-                        type="checkbox"
+                    <div role="cell">
+                      <Checkbox
                         checked={locked || p.read}
                         disabled={locked}
-                        onChange={(e) => set(m.key, "read", e.target.checked)}
-                        aria-label={`${m.title} read`}
+                        onChange={(v) => set(m.key, "read", v)}
+                        ariaLabel={`${m.title} read`}
+                        label="Read"
+                        className="perm-check"
                       />
-                      <b>Read</b>
-                    </label>
-                    <label role="cell">
-                      <input
-                        type="checkbox"
+                    </div>
+                    <div role="cell">
+                      <Checkbox
                         checked={locked || p.write}
                         disabled={locked}
-                        onChange={(e) => set(m.key, "write", e.target.checked)}
-                        aria-label={`${m.title} write`}
+                        onChange={(v) => set(m.key, "write", v)}
+                        ariaLabel={`${m.title} write`}
+                        label="Write"
+                        className="perm-check"
                       />
-                      <b>Write</b>
-                    </label>
+                    </div>
                   </div>
                 );
               })}

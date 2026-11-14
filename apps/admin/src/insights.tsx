@@ -926,7 +926,8 @@ export function EmployeeProfile() {
               <div>
                 <h1>{p.user.name}</h1>
                 <p>
-                  {p.user.role} · {p.user.email} ·{" "}
+                  {p.user.role} ·{" "}
+                  <span className="keep-case">{p.user.email}</span> ·{" "}
                   {p.territory || "No HQ assigned"}
                 </p>
                 <p>

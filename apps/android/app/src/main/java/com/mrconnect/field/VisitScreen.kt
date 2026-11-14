@@ -213,7 +213,7 @@ fun Visit(vm: FieldViewModel, capture: () -> Unit) {
             vm.records("product").forEach { p ->
                 FieldCard {
                     Row {
-                        Checkbox(
+                        FieldCheckbox(
                             detailed[p.text("id")] == true,
                             onCheckedChange = { detailed[p.text("id")] = it },
                         )

@@ -26,7 +26,7 @@ import {
   type RecordData,
   type User,
 } from "../../../packages/shared/src/index.ts";
-import { DateField, SelectField, TextField } from "./controls";
+import { Checkbox, DateField, SelectField, TextField } from "./controls";
 export function Overview() {
   const { workspace, version } = useWorkspace();
   const [date, setDate] = useState(
@@ -648,7 +648,11 @@ export function Team() {
                 </Link>
               ),
             },
-            { key: "email", label: "User ID" },
+            {
+              key: "email",
+              label: "User ID",
+              render: (r) => <span className="keep-case">{r.email}</span>,
+            },
             { key: "role", label: "Role" },
             {
               key: "managerId",
@@ -808,14 +812,12 @@ function UserForm({
             value={v.password}
             onChange={(e) => setV({ ...v, password: e.target.value })}
           />
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={v.active}
-              onChange={(e) => setV({ ...v, active: e.target.checked })}
-            />
-            Account active
-          </label>
+          <Checkbox
+            className="full"
+            checked={v.active}
+            onChange={(active) => setV({ ...v, active })}
+            label="Account active"
+          />
         </div>
         {error && <Notice tone="error">{error}</Notice>}
         <div className="form-actions">

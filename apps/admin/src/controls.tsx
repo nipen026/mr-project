@@ -733,3 +733,63 @@ export function TextAreaField({
     </FieldShell>
   );
 }
+
+/**
+ * The one checkbox used everywhere. The native input stays in the page for keyboard
+ * and screen-reader use; the visible box is drawn with the theme.
+ */
+export function Checkbox({
+  checked,
+  onChange,
+  label,
+  ariaLabel,
+  disabled,
+  indeterminate,
+  className,
+  id,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  /** Visible text beside the box. */
+  label?: ReactNode;
+  /** Required when there is no visible label. */
+  ariaLabel?: string;
+  disabled?: boolean;
+  /** Shows a dash (for "some selected") when not checked. */
+  indeterminate?: boolean;
+  className?: string;
+  id?: string;
+}) {
+  const auto = useId();
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (input.current)
+      input.current.indeterminate = !!indeterminate && !checked;
+  }, [indeterminate, checked]);
+  return (
+    <label
+      className={
+        "check" +
+        (disabled ? " is-disabled" : "") +
+        (className ? " " + className : "")
+      }
+    >
+      <input
+        ref={input}
+        id={id || auto}
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span className="check-box" aria-hidden="true">
+        <svg viewBox="0 0 16 16" focusable="false">
+          <path className="tick" d="M3.5 8.5l3 3 6-7" />
+          <path className="dash" d="M4 8h8" />
+        </svg>
+      </span>
+      {label ? <span className="check-label">{label}</span> : null}
+    </label>
+  );
+}
